@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Strataa · Project workspace</title>
+  <link rel="stylesheet" href="/project.css">
+  <script type="module" src="/project-app.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">본문으로 이동</a>
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="프로젝트 탐색">
+      <a class="brand" href="/">Strataa<span>Project workspace</span></a>
+      <div class="sidebar-label">CONNECTED PROJECTS</div>
+      <div id="project-list" class="project-list" aria-label="연결된 프로젝트"></div>
+      <details id="connect-panel" class="connect-panel" open>
+        <summary>+ 프로젝트 디렉터리 연결</summary>
+        <form id="connect-form">
+          <label for="project-path">서버의 프로젝트 절대 경로</label>
+          <input id="project-path" name="path" required placeholder="~/research/my-project" autocomplete="off" spellcheck="false" aria-describedby="path-help">
+          <p id="path-help" class="help">브라우저 업로드가 아닙니다. 이 서버가 접근할 수 있는 디렉터리를 연결하세요.</p>
+          <button id="connect-button" class="button primary" type="submit">디렉터리 연결</button>
+        </form>
+      </details>
+      <div class="sidebar-label section-label">WORKSPACE</div>
+      <nav class="workspace-nav" aria-label="프로젝트 보기">
+        <button type="button" class="nav-item active" data-view="overview" aria-current="page"><span>Overview</span><span class="nav-symbol" aria-hidden="true">◫</span></button>
+        <button type="button" class="nav-item" data-view="topdown"><span>Top-down</span><span id="concept-count" class="count">0</span></button>
+        <button type="button" class="nav-item" data-view="buildup"><span>BuildUp</span><span id="buildup-count" class="count">0</span></button>
+        <button type="button" class="nav-item" data-view="sources"><span>Sources</span><span id="source-count" class="count">0</span></button>
+      </nav>
+      <div class="sidebar-footer"><a href="/library">기존 논문 Library ↗</a><p>에이전트가 읽고 연결합니다.<br>사람은 요약과 근거로 판단합니다.</p></div>
+    </aside>
+    <div class="workspace">
+      <header class="topbar"><div class="breadcrumbs"><span id="project-breadcrumb">프로젝트</span><span class="separator">/</span><strong id="view-breadcrumb">Overview</strong></div><div class="topbar-actions"><span id="sync-status" role="status">연결 확인 중</span><button id="refresh-button" class="button compact" type="button">새로고침</button></div></header>
+      <main id="main" tabindex="-1">
+        <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
+        <section class="page-heading"><div><div class="eyebrow">YOUR RESEARCH, CONNECTED</div><h1 id="project-title">논문을 넘어, 프로젝트의 맥락으로.</h1><p id="project-root">프로젝트 디렉터리를 연결해 연구의 큰 그림과 다음 행동을 확인하세요.</p></div><button id="disconnect-button" class="button danger-text" type="button" hidden>연결 해제</button></section>
+        <div class="runtime-note"><span class="status-dot" aria-hidden="true"></span><span>화면이 보일 때 5초마다 로컬 기록을 새로 읽습니다. <strong>백그라운드 LLM 분석이나 에이전트 자동 실행은 하지 않습니다.</strong></span></div>
+        <section id="project-error" class="error-panel" role="alert" hidden><h2>프로젝트 기록을 읽을 수 없습니다</h2><p id="project-error-message"></p><p>아래 내용이 있다면 마지막으로 읽은 기록이며, 현재 파일 상태를 보장하지 않습니다.</p></section>
+        <section id="onboarding" class="onboarding panel" hidden>
+          <div class="eyebrow">AGENT → RECORDS → UNDERSTANDING</div><h2 id="onboarding-title">프로젝트를 이해하는 일은 에이전트에게.</h2><p id="onboarding-description">작업 중인 에이전트에 아래 요청을 전달하세요. 원문을 한 편씩 직접 옮기지 않아도 프로젝트 요약, 개념 지도, 연구 판단의 근거를 함께 남길 수 있습니다.</p>
+          <ol class="onboarding-steps"><li><span>01</span>에이전트에 요청</li><li><span>02</span>.strataa/project.json 생성</li><li><span>03</span>디렉터리 연결 · 자동 새로고침</li></ol>
+          <div class="section-heading"><h3>시작 요청</h3><button id="copy-bootstrap" class="button primary compact" type="button">에이전트 요청 복사</button></div><textarea id="bootstrap-prompt" class="prompt" rows="7" readonly aria-label="에이전트 시작 요청"></textarea><p class="help">연결 시에는 기록의 형식과 인용 근거를 검증합니다. 의미 분석과 기록 갱신은 이 요청을 받은 작업 에이전트가 수행합니다.</p>
+        </section>
+        <section id="view-overview" class="view" aria-labelledby="overview-heading" hidden><div class="view-heading"><h2 id="overview-heading">프로젝트 한눈에</h2><span id="updated-at" class="muted"></span></div><div id="stats" class="stats"></div><div class="overview-grid"><article class="panel digest"><div class="eyebrow">PROJECT DIGEST</div><h3>무엇을 연구하고 있나요?</h3><p id="project-summary" class="prose"></p></article><article class="panel next-action"><div class="eyebrow">NEXT ACTION</div><h3>지금 이어갈 한 가지</h3><p id="project-next" class="prose"></p></article></div><section class="panel gaps-panel"><div class="section-heading"><div><h3>근거와 기록의 빈틈</h3><p class="help">인용 없는 주장은 검증된 사실로 취급하지 않습니다.</p></div><span id="gap-count" class="badge"></span></div><div id="diagnostics"></div></section><div class="overview-grid"><section class="panel"><div class="section-heading"><h3>연구의 흐름</h3><button type="button" class="text-button" data-go="buildup">BuildUp 보기 →</button></div><div id="recent-records" class="compact-list"></div></section><section class="panel"><div class="section-heading"><h3>읽는 대신, 핵심부터</h3><button type="button" class="text-button" data-go="sources">Sources 보기 →</button></div><div id="source-preview" class="compact-list"></div></section></div></section>
+        <section id="view-topdown" class="view" aria-labelledby="topdown-heading" hidden><div class="view-heading"><div><h2 id="topdown-heading">Top-down</h2><p>분야 → 문제 → 방법 → 기법. 큰 그림에서 구체적인 연구까지.</p></div></div><div class="split-layout"><section class="panel collection-pane"><div class="panel-heading"><h3>개념 계층</h3><span class="muted">4 levels</span></div><div class="level-legend"><span>분야</span><span>문제</span><span>방법</span><span>기법</span></div><div id="concept-tree" class="record-list" aria-label="개념 계층"></div></section><section id="concept-detail" class="panel detail-pane" aria-label="선택한 개념 상세"></section></div></section>
+        <section id="view-buildup" class="view" aria-labelledby="buildup-heading" hidden><div class="view-heading"><div><h2 id="buildup-heading">BuildUp</h2><p>질문에서 가설, 결정, 실험, 결과까지. 판단의 이유와 상위 맥락을 보존합니다.</p></div><span class="help">accepted = 기록된 선택 · 과학적 입증 아님</span></div><div class="split-layout"><section class="panel collection-pane"><div class="panel-heading"><h3>연구 기록</h3><span class="muted">Parent → Child</span></div><div id="buildup-list" class="record-list" aria-label="BuildUp 기록"></div></section><section id="buildup-detail" class="panel detail-pane" aria-label="선택한 연구 기록 상세"></section></div></section>
+        <section id="view-sources" class="view" aria-labelledby="sources-heading" hidden><div class="view-heading"><div><h2 id="sources-heading">Sources</h2><p>원문을 모두 다시 읽지 않아도, 에이전트 요약과 실제 인용을 함께 확인할 수 있습니다.</p></div></div><div class="split-layout"><section class="panel collection-pane"><div class="panel-heading"><h3>프로젝트 자료</h3><span class="muted">Agent summaries</span></div><div id="source-list" class="record-list" aria-label="프로젝트 자료"></div></section><section id="source-detail" class="panel detail-pane" aria-label="선택한 자료 요약과 근거"></section></div></section>
+      </main>
+      <footer class="workspace-footer"><span>Strataa / Project knowledge workspace</span><span>읽기 전용 뷰 · 로컬 기록 · 근거 있는 판단</span></footer>
+    </div>
+  </div>
+</body>
+</html>

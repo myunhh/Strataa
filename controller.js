@@ -5,6 +5,7 @@ import { FLOW, createFlow, expectNative, finishFlow, flowText, nativeReference, 
 import { REVIEWER_AGENT, WORKER_AGENT, arisHandoff, arisSpawnPolicy, createArisRun, escapeHarnessTags, hydrateReview, prepareArisCall, recordReview } from "./aris-runtime.js";
 import { prepareWaveCall, waveHandoff } from "./waves.js";
 import { DEFAULT_MODELS, MODEL_ROLES, ROLE_LABELS, normalizeModelConfig, readModelConfig, writeModelConfig, supportedReasoning, validateModelChoice, uniformModelConfig, taskModelSelector } from "./model-config.js";
+import { projectHandoff } from "./project-context.js";
 
 const STATE = "agent-dialogue-state";
 const CARD = "agent-dialogue";
@@ -400,7 +401,7 @@ export function registerStrataa(pi, runModelTurn, createFlowView, skills, readAg
       pi.sendMessage({
         customType: CARD, display: false,
         content: `${aris ? arisHandoff(run.aris, AGENTS_DIR)
-          : `Router가 이 요청을 Solo 주도 일반 작업으로 분류했습니다. ARIS 스킬은 필요하지 않습니다. 원본 근거와 제약을 확인하고 필요한 최소 작업을 직접 수행·검증하세요. 위임 작업은 사용자가 설정한 Worker ${run.config.worker.model} · ${run.config.worker.reasoning}로 실행됩니다. 다른 모델·외부 에이전트로 우회하지 마세요. 관측과 추론, 검증하지 못한 부분을 구분하세요.`}\n\n${waveHandoff(decision.waves)}`,
+          : `Router가 이 요청을 Solo 주도 일반 작업으로 분류했습니다. ARIS 스킬은 필요하지 않습니다. 원본 근거와 제약을 확인하고 필요한 최소 작업을 직접 수행·검증하세요. 위임 작업은 사용자가 설정한 Worker ${run.config.worker.model} · ${run.config.worker.reasoning}로 실행됩니다. 다른 모델·외부 에이전트로 우회하지 마세요. 관측과 추론, 검증하지 못한 부분을 구분하세요.`}\n\n${waveHandoff(decision.waves)}${projectHandoff(run.ctx.cwd)}`,
         details: { runId: run.id, phase: "handoff", ...decision, speaker: role, ...run.config[role],
           ...(aris ? { worker: { agent: WORKER_AGENT, ...run.config.worker }, reviewer: { agent: REVIEWER_AGENT, ...run.config.reviewer }, install: run.aris.install, reviewRequired: run.aris.reviewRequired } : {}) },
       }, { triggerTurn: false, deliverAs: "nextTurn" });

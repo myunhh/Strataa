@@ -1,0 +1,143 @@
+{
+  "schemaVersion": 1,
+  "project": {
+    "name": "Local Notes Demo",
+    "summary": "[Observed] example-source.md describes a proposed evidence-linked local manifest and an unexecuted viewer check. Coverage: one self-contained documentation example; no code, runtime logs or actual research outcomes were inspected. [Inferred] this manifest demonstrates how to make a proposed choice traceable. [Unknown] user adoption and any benefit to human learning are unestablished.",
+    "nextStep": "[Observed] the document asks for review of the proposed choice. [Proposed] review the quoted rationale before deciding whether to adopt it; do not treat the planned check as completed."
+  },
+  "sources": [
+    {
+      "id": "source-local-notes",
+      "title": "Local Notes Demo documentation",
+      "path": "example-source.md",
+      "summary": "[Observed] self-contained illustrative document containing a question, hypothesis, proposed choice, alternative, rationale and planned check. It explicitly records no execution or user acceptance.",
+      "authors": "",
+      "year": "",
+      "url": ""
+    }
+  ],
+  "concepts": [
+    {
+      "id": "field-project-knowledge",
+      "name": "Project knowledge management",
+      "level": "field",
+      "parentId": null,
+      "description": "[Observed] the example document names project knowledge management as its field; this is a local illustrative taxonomy, not a claim about an established research classification.",
+      "sourceIds": ["source-local-notes"]
+    },
+    {
+      "id": "problem-decision-traceability",
+      "name": "Decision-to-document traceability",
+      "level": "problem",
+      "parentId": "field-project-knowledge",
+      "description": "[Observed] the document identifies losing the connection between project decisions and supporting local documents as the problem.",
+      "sourceIds": ["source-local-notes"]
+    },
+    {
+      "id": "method-evidence-manifest",
+      "name": "Evidence-linked project manifest",
+      "level": "method",
+      "parentId": "problem-decision-traceability",
+      "description": "[Observed] the document proposes an evidence-linked manifest. [Unknown] it does not establish that this method solves the problem.",
+      "sourceIds": ["source-local-notes"]
+    },
+    {
+      "id": "technique-local-quote-match",
+      "name": "Local quote containment",
+      "level": "technique",
+      "parentId": "method-evidence-manifest",
+      "description": "[Observed] the named technique matches a stored quote to a local Markdown source. [Inferred] this can support inspectability but cannot by itself verify the truth of the quoted claim.",
+      "sourceIds": ["source-local-notes"]
+    }
+  ],
+  "buildUps": [
+    {
+      "id": "question-traceable-choice",
+      "title": "Can the proposed choice remain traceable locally?",
+      "kind": "question",
+      "status": "active",
+      "parentId": null,
+      "body": "[Observed] the example document asks whether a local manifest can make the reason for a proposed project choice traceable without another model call in the viewer.",
+      "alternatives": "[Observed] the document contrasts a local manifest with repeated model reconstruction when the viewer opens.",
+      "rationale": "[Observed] this question is written under Open question. [Unknown] no outcome answers it yet.",
+      "evidence": [
+        {
+          "sourceId": "source-local-notes",
+          "quote": "Can a local manifest make the reason for a proposed project choice traceable without a separate model call in the viewer?"
+        }
+      ],
+      "nextStep": "[Proposed] examine the linked hypothesis and proposal, retaining the question as unresolved.",
+      "sourceIds": ["source-local-notes"],
+      "conceptIds": ["problem-decision-traceability"],
+      "skillNames": []
+    },
+    {
+      "id": "hypothesis-linked-quote",
+      "title": "Source links and quotations may support traceability",
+      "kind": "hypothesis",
+      "status": "draft",
+      "parentId": "question-traceable-choice",
+      "body": "[Observed] the document proposes that a reader may trace a choice through its source and exact quotation. [Unknown] this has not been measured.",
+      "alternatives": "[Unknown] the document provides no empirical comparison of traceability with and without quotations.",
+      "rationale": "[Inferred] linking a choice to the text behind it may make its documented reason inspectable; this does not prove the choice correct.",
+      "evidence": [
+        {
+          "sourceId": "source-local-notes",
+          "quote": "A reader may be able to trace a proposed choice if the manifest links the choice to a source and an exact quotation. This is a hypothesis, not a measured outcome."
+        }
+      ],
+      "nextStep": "[Proposed] review the hypothesis before authorizing any check of reader traceability.",
+      "sourceIds": ["source-local-notes"],
+      "conceptIds": ["method-evidence-manifest", "technique-local-quote-match"],
+      "skillNames": []
+    },
+    {
+      "id": "decision-local-manifest-proposal",
+      "title": "Propose a project-local manifest rather than viewer reanalysis",
+      "kind": "decision",
+      "status": "draft",
+      "parentId": "hypothesis-linked-quote",
+      "body": "[Observed] the document proposes keeping a UTF-8 JSON manifest inside the project for local validation and display. This is a proposed choice, not an accepted decision.",
+      "alternatives": "[Observed] ask a model to reconstruct project reasoning every time the viewer opens instead of maintaining a local manifest.",
+      "rationale": "[Observed] the document proposes retaining inspectable evidence and avoiding repeated semantic analysis. [Unknown] user adoption is not recorded.",
+      "evidence": [
+        {
+          "sourceId": "source-local-notes",
+          "quote": "The proposal is to keep a UTF-8 JSON manifest inside the project and let the viewer validate and display it locally."
+        },
+        {
+          "sourceId": "source-local-notes",
+          "quote": "The proposed rationale is to retain inspectable evidence and avoid repeated semantic analysis in the viewer. No user has accepted this proposal in this example."
+        }
+      ],
+      "nextStep": "[Proposed] review the proposed choice and evidence before deciding whether to adopt it.",
+      "sourceIds": ["source-local-notes"],
+      "conceptIds": ["method-evidence-manifest"],
+      "skillNames": []
+    },
+    {
+      "id": "experiment-viewer-check-plan",
+      "title": "Planned viewer traceability check, not executed",
+      "kind": "experiment",
+      "status": "draft",
+      "parentId": "decision-local-manifest-proposal",
+      "body": "[Observed] the document plans to open the demo viewer and inspect whether the displayed quote occurs in the source. It explicitly says this has not run.",
+      "alternatives": "[Unknown] no alternative check procedure is documented.",
+      "rationale": "[Observed] the planned check concerns traceability in this example only, not a demonstrated learning benefit.",
+      "evidence": [
+        {
+          "sourceId": "source-local-notes",
+          "quote": "The planned check is to open the demo in the viewer and inspect whether the displayed quote occurs in this document. The check has not been run."
+        },
+        {
+          "sourceId": "source-local-notes",
+          "quote": "It would assess traceability of this example only, not whether the proposal improves human learning."
+        }
+      ],
+      "nextStep": "[Proposed] review the proposal first. If a check is subsequently authorized and performed, append its actual result with genuine evidence instead of marking this plan successful.",
+      "sourceIds": ["source-local-notes"],
+      "conceptIds": ["technique-local-quote-match"],
+      "skillNames": []
+    }
+  ]
+}

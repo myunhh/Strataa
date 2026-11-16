@@ -1,8 +1,13 @@
 # Changelog
 
-## Unreleased
+## 4.9.0 — 2026-11-16
 
 - Withdraw the paper-upload Dashboard, its tests and first-party skill from public distribution while redesigning project-directory integration locally. Preserve user databases, installed copies, historical release notes and shared model settings.
+- Replace the default entry point with project-directory connections: one `strataa-project` skill maintains grounded summaries, Top-down concepts, BuildUp history and next actions in `.strataa/project.json`.
+- Read and validate only explicit bounded local sources; verify quote containment, hierarchy and references without a second model call. Show evidence gaps and invalid/stale records rather than inventing analysis progress.
+- Add manifest opt-in to both Solo and Brain handoffs using only the bundled skill as instructions; preserve read-only requests and keep untrusted project contents out of the injected policy.
+- Preserve the existing paper database and optional upload/metadata/full-analysis workflows at `/library`. Keep external inference consent separate from free local directory refresh.
+- Pass 49 focused filesystem/API/library contracts plus one Solo/Brain opt-in scenario. Connect this real project in the browser; verify Top-down, BuildUp evidence, 5-second file-change propagation, disconnect/reconnect, missing-record guidance, all four views at 390px and the retained three-paper library. No additional model inference was invoked.
 
 ## 4.8.0 — 2026-11-16
 

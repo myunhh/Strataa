@@ -16,7 +16,7 @@ const match = version.match(/(\d+)\.(\d+)\.(\d+)/);
 if (!match || Number(match[1]) < 18 || (Number(match[1]) === 18 && Number(match[2]) < 15)) {
   throw new Error(`OMP >=18.15.0 is required; found ${version}`);
 }
-const files = ["package.json", "index.js", "controller.js", "protocol.js", "model-config.js", "waves.js", "transport.js", "prompt-summary.js", "flow.js", "flow-view.js", "flow-store.js", "flow-watch.js", "live-hosts.js", "saved-flow.js", "aris-skills.js", "aris-runtime.js", "aris-provenance.json", "ARIS-LICENSE", "install.mjs", "README.md", "CHANGELOG.md"];
+const files = ["package.json", "index.js", "controller.js", "project-context.js", "protocol.js", "model-config.js", "waves.js", "transport.js", "prompt-summary.js", "flow.js", "flow-view.js", "flow-store.js", "flow-watch.js", "live-hosts.js", "saved-flow.js", "aris-skills.js", "aris-runtime.js", "aris-provenance.json", "ARIS-LICENSE", "install.mjs", "README.md", "CHANGELOG.md"];
 for (const directory of ["agents", "test"]) {
   for (const name of (await readdir(path.join(source, directory))).sort()) {
     if (name.endsWith(directory === "agents" ? ".md" : ".test.js")) files.push(`${directory}/${name}`);
@@ -32,7 +32,7 @@ async function walk(directory) {
     else throw new Error(`Refusing to ship non-regular file: ${relative}`);
   }
 }
-for (const directory of ["skills", "tools", "templates"]) await walk(directory);
+for (const directory of ["skills", "tools", "templates", "dashboard"]) await walk(directory);
 const provenance = JSON.parse(await readFile(path.join(source, "aris-provenance.json"), "utf8"));
 for (const entry of provenance.files) {
   if (!files.includes(entry.path)) throw new Error(`ARIS pack file listed in aris-provenance.json is missing from the checkout: ${entry.path}`);

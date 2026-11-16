@@ -1,6 +1,6 @@
-# Strataa — OMP Research Harness
+# Strataa — Project Research Workspace & OMP Harness
 
-**ARIS 연구 스킬과 모델별 역할·의존 Wave를 연결하는 OMP 플러그인.**
+**에이전트가 프로젝트 근거·Top-down·BuildUp을 기록하고, 사람은 디렉터리를 연결해 요약과 다음 행동을 확인합니다.**
 
 [ARIS](https://github.com/wanshuiyin/auto-claude-code-research-in-sleep)의 원본 스킬 87개를 OMP의 native 에이전트·도구·대화 UI에 연결하는 독립 플러그인입니다. **Router → Brain → Worker + 별도 세션 Reviewer → Brain 최종 종합**으로 연구 작업을 실행하고, 일반 작업은 Solo가 주도합니다. Router가 경로와 **단계별 종속성·목표·병렬도**를 결정하고, 같은 의존 깊이의 독립 단계들을 하나의 실행 Wave로 묶습니다. 모든 역할은 OMP 전체 모델 목록에서 선택하며 기존 조합을 추천 기본값으로 제공합니다. OMP 본체·공통 하네스·전역 기본값·인증·재귀 설정은 변경하지 않습니다.
 
@@ -108,9 +108,29 @@ OMP의 개별 스킬 slash command를 직접 실행하면 Strataa 입력 라우�
 
 취소·세션 이동 시 늦게 도착한 결과로 새 작업을 실행하지 않습니다. 같은 세션의 compaction은 진행 중인 native 검토 추적을 보존합니다. 시각화는 UI 전용이며 추가 모델 응답을 만들지 않습니다. 이전 Flow의 모델 표시는 당시 기록 그대로 유지합니다.
 
-## Dashboard 배포 중단
+## 프로젝트 디렉터리 연결
 
-기존 논문 업로드 중심 Dashboard와 전용 스킬은 공개 배포에서 제거했습니다. 프로젝트 기록 스킬·디렉터리 연결 방식으로 로컬에서 재설계 중입니다. 기존 로컬 논문 DB와 불변 설치본은 삭제하지 않습니다. 공유 모델 프로필의 analysis 역할은 저장된 설정 호환성을 위해 유지하며 현재 배포에는 웹 분석 서버가 없습니다.
+1. 기존 프로젝트에서 에이전트에게 **“strataa-project 스킬로 이 프로젝트의 기존 문서·코드·공개 실험 결과를 분석해 `.strataa/project.json`을 만들어 줘. Top-down과 BuildUp을 근거에 연결하고 모르는 내용은 비워 둬.”**라고 요청합니다. Strataa 프로젝트가 아니어도 같은 스킬을 사용할 수 있습니다.
+2. 설치한 Strataa 폴더에서 `npm run dashboard`로 실행하고 **http://127.0.0.1:4310**을 엽니다.
+3. 프로젝트의 절대 경로 또는 `~/…`를 입력해 연결합니다. 전체 요약·다음 행동·근거 누락부터 보고, Top-down·BuildUp·출처를 필요할 때 펼칩니다. 화면이 보이는 동안 5초마다 기록을 다시 읽습니다.
+
+### 기록하는 쪽 / 읽는 쪽
+
+- **작업 에이전트:** [`strataa-project`](skills/strataa-project/SKILL.md)로 기존 자료를 의미 분석하고 기록합니다. 이후 실제 결정·관측이 바뀔 때 같은 ID를 유지하며 갱신합니다. 사람이 논문마다 필드를 입력할 필요가 없습니다. 스킬을 쓰는 에이전트의 통상 모델 사용량은 발생합니다.
+- **Dashboard:** 명시한 파일의 인용·ID·계층·참조를 로컬 검증하고 구조화된 기록을 표시합니다. 연결·새로고침은 LLM 호출이나 과금을 하지 않습니다. 기록이 없는 디렉터리를 임의로 전부 스캔하거나 내용을 추측하지 않습니다.
+- **Strataa 자동 유지:** 프로젝트 루트의 `.strataa/project.json`이 있으면 Solo와 Brain handoff에 bundled 기록 스킬을 추가합니다. 읽기 전용 요청에서는 수정하지 않고 메인 에이전트가 기록을 통합합니다. 존재하지 않는 프로젝트에는 자동 기록을 강제하지 않습니다. 다른 호스트에서는 스킬을 명시적으로 적용하세요.
+
+계약은 `.strataa/project.json`의 `schemaVersion: 1`, `project`, `sources`, `concepts`, `buildUps`입니다. 정확한 필드와 예시는 [스킬](skills/strataa-project/SKILL.md)과 [예제](skills/strataa-project/example.json)에 있습니다. 개념은 분야→문제→방법→기법, BuildUp은 질문·가설·결정·실험·결과를 부모와 근거에 연결합니다. **accepted는 기록된 선택이지 과학적 검증 통과가 아닙니다.** 불확실한 과거 의도·미실행 실험·비공개 추론을 만들어 쓰지 않습니다.
+
+일반 프로젝트의 다른 에이전트에도 쓰려면 `skills/strataa-project/`를 해당 프로젝트의 `.agents/skills/strataa-project/` 또는 해당 호스트가 지원하는 스킬 경로에 복사하고 스킬 이름을 지정하세요. 전역 지침이나 모델 설정을 자동 변경하지 않습니다.
+
+### 보안·저장·기존 서재
+
+서버는 loopback 전용이며 다른 Origin/Host의 쓰기를 거부합니다. 연결 목록만 `STRATAA_RESEARCH_DIR`(기본 `${XDG_DATA_HOME:-~/.local/share}/omp-agent-dialogue/research`)에 저장하고 프로젝트 파일은 읽기 전용입니다. 연결 해제는 프로젝트 파일이나 논문을 삭제하지 않습니다. manifest 2 MiB, 출처별 2 MiB, 출처 총합 20 MiB 한도를 적용하고 심볼릭 링크·프로젝트 밖 경로·비밀 파일을 거부합니다. 일반 문서에 적힌 비밀 값까지 자동 판별하지는 못하므로 기록 전 제거하세요. 잘못된 갱신은 명시적으로 오류를 표시하며 이전 자료를 최신이라고 속이지 않습니다.
+
+기존 논문 DB는 그대로 **[/library](http://127.0.0.1:4310/library)**에서 엽니다. PDF/text 업로드, 고정 소형 모델 `openai-codex/gpt-6-luna`/low 메타데이터 채우기, 명시적 전체 분석·내보내기를 유지합니다. 메타데이터는 PDF 앞 2쪽·최대 16,000자를 외부 모델에 전송하므로 끄기 옵션과 과금 안내를 확인하세요. 전체 분석은 공유 analysis 역할을 사용하며 별도 동의가 필요합니다. PDF 추출은 로컬 `pdftotext`; URL 자동 수집·OCR은 하지 않습니다.
+
+환경 변수: `STRATAA_DASHBOARD_PORT`(4310), `STRATAA_RESEARCH_DIR`, `OMP_BIN`, `OMP_STRATAA_FLOW_DIR`. 저장소당 서버 하나를 실행하세요. 설치 후 작업이 끝난 OMP에서 `/reload-plugins`하면 `/strataa-project`를 사용할 수 있습니다. `node install.mjs`는 Dashboard와 자체 스킬을 배포하되 vendored ARIS 87개 원본은 바꾸지 않습니다.
 
 ## Agent Flow 그래프
 
@@ -149,7 +169,7 @@ OMP의 개별 스킬 slash command를 직접 실행하면 Strataa 입력 라우�
 - `ARIS-LICENSE`: 원본 MIT 라이선스. 스킬 내부 별도 라이선스도 보존.
 - `aris-provenance.json`: 출처·commit·배포 파일 목록과 크기·실행 권한.
 
-공식 plugin-root `skills/`·`agents/` 검색을 사용합니다. `install.mjs`는 코드·스킬·보조 파일을 `~/.local/share/omp-agent-strataa/4.8.0-<fingerprint>/`에 독립 복사한 뒤 `omp plugin link`로 연결합니다. 이 작업공간이나 다운로드 clone을 지워도 설치본은 유지됩니다. upstream 업데이트는 자동 반영하지 않습니다.
+공식 plugin-root `skills/`·`agents/` 검색을 사용합니다. `install.mjs`는 코드·스킬·보조 파일을 `~/.local/share/omp-agent-strataa/4.9.0-<fingerprint>/`에 독립 복사한 뒤 `omp plugin link`로 연결합니다. 이 작업공간이나 다운로드 clone을 지워도 설치본은 유지됩니다. upstream 업데이트는 자동 반영하지 않습니다.
 
 **OMP 적용판의 경계:** 원본 파일은 보존하지만 원본 Claude/Codex MCP 서버, `reviewer_route.py`/`review_gate.py`의 백엔드 승인, Copilot native 증명은 사용하지 않습니다. OMP 결과를 원본 ARIS의 인증된 acceptance로 기록하지 않습니다. 검색·LaTeX·GPU·외부 API 등 스킬별 선택적 의존성은 별도이며, 없으면 해당 작업에서 부족한 조건을 보고해야 합니다. `aris-fanout-leaf`는 설치하지 않았으므로 해당 스킬의 순차 실행 대안을 사용합니다. 모델·도구 API의 미래 호환성까지 보장하지 않습니다.
 
