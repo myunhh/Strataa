@@ -32,7 +32,7 @@ async function walk(directory) {
     else throw new Error(`Refusing to ship non-regular file: ${relative}`);
   }
 }
-for (const directory of ["skills", "tools", "templates", "dashboard"]) await walk(directory);
+for (const directory of ["skills", "tools", "templates"]) await walk(directory);
 const provenance = JSON.parse(await readFile(path.join(source, "aris-provenance.json"), "utf8"));
 for (const entry of provenance.files) {
   if (!files.includes(entry.path)) throw new Error(`ARIS pack file listed in aris-provenance.json is missing from the checkout: ${entry.path}`);

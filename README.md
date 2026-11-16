@@ -1,6 +1,6 @@
-# Strataa — Research Dashboard & OMP Harness
+# Strataa — OMP Research Harness
 
-**논문별 근거를 공통 개념으로 연결하고, 연구 BuildUp과 의사결정을 쌓아가는 로컬 연구 작업공간.**
+**ARIS 연구 스킬과 모델별 역할·의존 Wave를 연결하는 OMP 플러그인.**
 
 [ARIS](https://github.com/wanshuiyin/auto-claude-code-research-in-sleep)의 원본 스킬 87개를 OMP의 native 에이전트·도구·대화 UI에 연결하는 독립 플러그인입니다. **Router → Brain → Worker + 별도 세션 Reviewer → Brain 최종 종합**으로 연구 작업을 실행하고, 일반 작업은 Solo가 주도합니다. Router가 경로와 **단계별 종속성·목표·병렬도**를 결정하고, 같은 의존 깊이의 독립 단계들을 하나의 실행 Wave로 묶습니다. 모든 역할은 OMP 전체 모델 목록에서 선택하며 기존 조합을 추천 기본값으로 제공합니다. OMP 본체·공통 하네스·전역 기본값·인증·재귀 설정은 변경하지 않습니다.
 
@@ -20,7 +20,7 @@ node install.mjs
 
 **Dialogue에서 전환:** 새 설치가 성공한 뒤 `omp plugin uninstall omp-agent-dialogue`로 이전 플러그인 등록만 제거하세요. 이전 불변 설치본·연구 DB·세션 기록은 삭제하지 않습니다. 실행 중인 OMP 작업에는 reload를 보내지 말고 작업이 끝난 뒤 아래 명령을 실행하세요.
 
-제품명은 Strataa, 명령은 `/strataa`와 `/strataa-dashboard`로 전환하며 이전 명령 별칭은 제공하지 않습니다. 환경 변수도 `STRATAA_*`와 `OMP_STRATAA_FLOW_DIR`로 바뀝니다. 기존 데이터가 그대로 열리도록 기본 연구·Flow 경로의 `omp-agent-dialogue`와 세션 직렬화 ID는 유지합니다. 사용자 지정 경로를 썼다면 새 환경 변수에 같은 경로를 지정하세요.
+제품명은 Strataa, 명령은 `/strataa`로 전환하며 이전 명령 별칭은 제공하지 않습니다. 환경 변수도 `STRATAA_*`와 `OMP_STRATAA_FLOW_DIR`로 바뀝니다. 기존 데이터 경로와 세션 직렬화 ID는 유지합니다.
 
 현재 OMP에서 진행 중인 작업을 마친 뒤:
 
@@ -108,41 +108,9 @@ OMP의 개별 스킬 slash command를 직접 실행하면 Strataa 입력 라우�
 
 취소·세션 이동 시 늦게 도착한 결과로 새 작업을 실행하지 않습니다. 같은 세션의 compaction은 진행 중인 native 검토 추적을 보존합니다. 시각화는 UI 전용이며 추가 모델 응답을 만들지 않습니다. 이전 Flow의 모델 표시는 당시 기록 그대로 유지합니다.
 
-## Research Dashboard — 논문·개념·BuildUp
+## Dashboard 배포 중단
 
-```sh
-npm run dashboard
-# http://127.0.0.1:4310
-```
-
-Node.js **22.13 이상**이 필요하며 npm 의존성 설치는 없습니다. PDF 추출은 `pdftotext`(Ubuntu: `poppler-utils`), 자동 분석은 로그인된 `omp` CLI를 사용합니다. 실제 검증 환경은 Node 24.21.0 / OMP 18.20.3입니다.
-
-1. **Library:** PDF·Markdown·UTF-8 텍스트 또는 붙여넣은 원문을 논문별로 저장합니다. 저자·연도·출처 URL·읽기 노트를 기록하고 원본 PDF를 보존합니다. URL은 출처 정보이며 원문을 자동 수집하지 않습니다.
-2. **분석:** 논문을 선택하고 원문 전송·모델 사용 비용 안내를 확인한 뒤 분석 버튼을 누릅니다. 업로드만으로 모델을 호출하지 않습니다. 선택한 원문과 기존 개념을 OMP의 명시 모델에 한 번 보내며, 도구·확장·재시도·모델 대체·자동 문맥 승격은 끕니다. 기존 인증·전역 설정은 변경하지 않습니다.
-3. **Top-down:** **분야 → 문제 → 방법 → 기법**을 공통 개념 ID로 연결합니다. 개념을 누르면 해당 논문별 원문 인용을 확인합니다. 논문별 필터와 2편 이상 공유 개념 필터, 직접 개념 추가·편집·검토 표시를 제공합니다. 자동 결과는 초안이며 같은 이름이나 인용의 존재가 과학적 동등성을 입증하지 않습니다.
-4. **BuildUp:** 질문·가설·결정·실험·결과를 상위 기록, 논문, 개념, 실제 스킬, 공개 Flow 캡처에 연결합니다. 내용·대안·선택 이유·근거·다음 검증을 저장하며 수정 전 버전도 보존합니다. **채택은 사용자의 선택이지 독립 검토 통과나 연구 결과 입증이 아닙니다.**
-5. **Strataa:** 실제 ARIS 스킬 87개와 자체 `strataa-dashboard` 스킬의 원문을 읽고, BuildUp·논문 인용을 포함한 실행용 요청을 복사합니다. 스킬·Flow 화면은 자동 에이전트 실행이나 실행 승인이 아닙니다. 기존 `/strataa on`의 권한·독립 검토 계약을 유지합니다.
-
-Human-Learning의 개념 지도, 원문을 옆에서 읽는 패널, Context / Options / Decision / Evidence 기록 방식을 연구 대상으로 옮겼습니다. Human-Learning 원본 앱과 vendored ARIS 파일은 수정하지 않았습니다.
-
-| 환경 변수 | 기본값 / 의미 |
-| --- | --- |
-| `STRATAA_DASHBOARD_PORT` | `4310`, loopback 전용 |
-| `STRATAA_RESEARCH_DIR` | `${XDG_DATA_HOME:-~/.local/share}/omp-agent-dialogue/research` |
-| `OMP_BIN` | `omp` 실행 파일 |
-| `OMP_STRATAA_FLOW_DIR` | 기존 Strataa 공개 Flow 저장소 선택; producer와 같게 지정 |
-
-Dashboard 분석 모델·강도는 `/strataa analysis <provider/model> [effort]` 또는 `/strataa models`에서 설정합니다. 분석 동의 화면에는 현재 모델·강도를 표시하며 실행 중 작업은 시작 당시 설정을 유지합니다. 별도 `STRATAA_ANALYSIS_MODEL` 환경 변수는 더 이상 사용하지 않습니다.
-
-저장은 브라우저가 아닌 `dashboard.sqlite`에 이루어집니다. **저장소당 서버 하나**를 실행하세요. 논문 원문은 저장 뒤 읽기 전용이며 메타데이터·노트·개념 연결은 편집할 수 있습니다. 재분석은 선택 논문의 분석과 개념 연결을 교체하지만 원문·읽기 노트·BuildUp은 유지합니다. 분석 중 다른 저장이 발생하면 새 결과로 덮어쓰지 않고 충돌을 알립니다.
-
-파일당 20 MiB, 분석당 최대 40편·원문/메타데이터/기존 개념 JSON 합계 180,000자, 개념 카탈로그 최대 1,000개입니다. 한도를 넘거나 원문 근거가 부족하면 명시적으로 실패하며 조용히 자르거나 재시도하지 않습니다. 스캔 PDF는 OCR한 텍스트를 직접 추가하세요. 개념마다 논문별 가장 명확한 인용 하나를 보존합니다.
-
-논문·BuildUp별 Markdown과 전체 연구 데이터 JSON을 내보낼 수 있습니다. **JSON에는 PDF 바이너리가 포함되지 않습니다.** 원본 PDF는 논문별 다운로드, 완전한 로컬 백업은 서버 종료 후 SQLite 파일을 복사하세요. 내보낸 파일에는 연구 원문이 포함되므로 공유 전 확인하세요.
-
-`node install.mjs`는 Dashboard와 자체 스킬도 함께 배포합니다. 기존 설치에서 스킬을 등록하려면 설치 후 `/reload-plugins`를 실행하고 `/strataa-dashboard`를 사용하세요. 이 자체 스킬은 ARIS 원본 provenance 목록에는 추가하지 않습니다.
-
-검증: `node --test test/dashboard*.test.js`. 최초 22개 중 21개가 통과했고, Host 헤더를 유지하지 않는 fetch 기반 검사 요청을 실제 HTTP 요청으로 보정한 뒤 해당 검사 1개가 통과했습니다. 실제 브라우저에서 업로드·공통 그래프·필터·개념 검토·읽기 노트·BuildUp 저장/재열기/수정 이력·스킬 원문/요청 복사·Markdown 다운로드를 확인했습니다. 1440px에서는 네 계층을 함께 표시하며 390px에서는 페이지 넘침 없이 그래프만 가로 스크롤합니다. 실제 OMP 추론에는 **합성 검증 자료**를 사용했으며 학술 분석 품질의 증거가 아닙니다. 첫 추론에서 발견한 SDK 메시지 메타데이터 비교 문제를 공개 결과·모델·완료 상태 비교로 수정했습니다. 근거는 `runs/dialogue-dashboard-*`이며 독립 교차모델 가정 검토는 수행하지 않았습니다.
+기존 논문 업로드 중심 Dashboard와 전용 스킬은 공개 배포에서 제거했습니다. 프로젝트 기록 스킬·디렉터리 연결 방식으로 로컬에서 재설계 중입니다. 기존 로컬 논문 DB와 불변 설치본은 삭제하지 않습니다. 공유 모델 프로필의 analysis 역할은 저장된 설정 호환성을 위해 유지하며 현재 배포에는 웹 분석 서버가 없습니다.
 
 ## Agent Flow 그래프
 

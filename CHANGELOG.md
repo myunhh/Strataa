@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Withdraw the paper-upload Dashboard, its tests and first-party skill from public distribution while redesigning project-directory integration locally. Preserve user databases, installed copies, historical release notes and shared model settings.
+
 ## 4.8.0 — 2026-11-16
 
 - Replace family-restricted role selectors with the full host model catalog, all-role model/effort selection, per-role editing, and one-step restoration of the existing recommended mix.
