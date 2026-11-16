@@ -26,6 +26,21 @@ function text(value, label, required = false) {
   if (typeof value !== "string" || (required && !value.trim())) fail(`${label} must be ${required ? "a nonempty" : "a"} string`);
   return value;
 }
+function projectPath(input) {
+  text(input, "Project path", true);
+  let value = input.trim();
+  if (value.startsWith('"') && value.endsWith('"')) value = value.slice(1, -1);
+  text(value, "Project path", true);
+  const unc = value.replace(/\\/g, "/").match(/^\/\/(?:wsl\.localhost|wsl\$)\/([^/]+)(\/.*)?$/iu);
+  if (unc) {
+    const distro = process.env.WSL_DISTRO_NAME;
+    if (process.platform !== "linux" || !distro) fail("WSL 경로를 변환할 서버 배포판을 확인할 수 없습니다. 서버의 Linux 절대 경로를 입력하세요.");
+    if (unc[1].toLowerCase() !== distro.toLowerCase()) fail(`다른 WSL 배포판의 경로입니다: ${unc[1]}. 현재 서버는 ${distro}에서 실행 중입니다.`);
+    return unc[2] || "/";
+  }
+  if (/^(?:[a-z]:|\\\\|\/\/)/iu.test(value)) fail("지원하지 않는 Windows/네트워크 경로입니다. 서버의 Linux 절대 경로나 같은 배포판의 WSL 경로를 입력하세요.");
+  return value === "~" ? homedir() : value.startsWith("~/") ? path.join(homedir(), value.slice(2)) : value;
+}
 function array(value, label, max) {
   if (!Array.isArray(value) || value.length > max) fail(`${label} must be an array of at most ${max} entries`);
   return value;
@@ -118,7 +133,12 @@ function parse(content, label) {
 async function snapshot(id, root) {
   const rootHandle = await openRoot(root);
   try {
-    const manifest = await boundedRead(rootHandle, [".strataa", "project.json"], 2 * MiB);
+    let manifest;
+    try { manifest = await boundedRead(rootHandle, [".strataa", "project.json"], 2 * MiB); }
+    catch (error) {
+      if (error.code === "ENOENT") fail(`프로젝트 디렉터리는 있지만 .strataa/project.json이 없습니다: ${root}. 이 프로젝트에서 strataa-project 스킬로 기록을 만든 뒤 다시 연결하세요.`);
+      throw error;
+    }
     const data = parse(manifest.content, ".strataa/project.json");
     keys(data, ["schemaVersion", "project", "sources", "concepts", "buildUps"], "manifest");
     if (data.schemaVersion !== 1) fail("schemaVersion must be 1");
@@ -260,8 +280,7 @@ export function createProjectRegistry(directory) {
   return {
     list() { return serial(async () => { const values = []; for (const id of links.keys()) values.push(await refresh(id)); return values; }); },
     connect(input) { return serial(async () => {
-      text(input, "Project path", true);
-      const expanded = input === "~" ? homedir() : input.startsWith("~/") ? path.join(homedir(), input.slice(2)) : input;
+      const expanded = projectPath(input);
       let root;
       try { root = await realpath(path.resolve(expanded)); }
       catch (error) { throw new ProjectError(`Cannot connect project: ${error.message}`); }

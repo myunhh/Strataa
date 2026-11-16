@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Accept Windows Explorer WSL UNC paths (`wsl.localhost` and `wsl$`) for the server's current distribution, including quoted paths. Reject other distributions and unsupported Windows shares instead of treating them as relative Linux paths. Explain when a valid project directory still needs `.strataa/project.json`.
+
 ## 4.9.0 — 2026-11-16
 
 - Withdraw the paper-upload Dashboard, its tests and first-party skill from public distribution while redesigning project-directory integration locally. Preserve user databases, installed copies, historical release notes and shared model settings.

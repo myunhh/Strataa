@@ -70,6 +70,32 @@ test("connections are canonical, idempotent, isolated, persistent and read-only"
   await assert.rejects(reopened.disconnect("missing"), error => error.status === 404);
 });
 
+test("WSL Explorer paths connect to the same local project and never cross distributions", { skip: process.platform !== "linux" }, async t => {
+  const f = await fixture(t);
+  const previous = process.env.WSL_DISTRO_NAME;
+  process.env.WSL_DISTRO_NAME = "Ubuntu-Test";
+  t.after(() => { if (previous === undefined) delete process.env.WSL_DISTRO_NAME; else process.env.WSL_DISTRO_NAME = previous; });
+  const local = await f.registry.connect(f.root);
+  const windowsPath = f.root.replace(/\//g, "\\");
+  for (const input of [
+    `\\\\wsl.localhost\\Ubuntu-Test${windowsPath}`,
+    `\\\\wsl$\\Ubuntu-Test${windowsPath}`,
+    `  "\\\\WSL.LOCALHOST\\ubuntu-test${windowsPath}"  `,
+    `//wsl.localhost/Ubuntu-Test${f.root}`,
+  ]) {
+    const connected = await f.registry.connect(input);
+    assert.equal(connected.id, local.id);
+    assert.equal(connected.root, local.root);
+    assert.equal(connected.status, "ready");
+  }
+  for (const input of [`\\\\wsl.localhost\\Other-Distro${windowsPath}`, "\\\\server\\share\\project", "C:\\Users\\project"]) {
+    await assert.rejects(f.registry.connect(input), error => error instanceof ProjectError && error.status === 400);
+  }
+  delete process.env.WSL_DISTRO_NAME;
+  await assert.rejects(f.registry.connect(`\\\\wsl.localhost\\Ubuntu-Test${windowsPath}`), error => error instanceof ProjectError && error.status === 400);
+  assert.equal((await f.registry.list()).length, 1);
+});
+
 test("polling rereads sources and manifests, explicitly marks stale data, and recovers", async t => {
   const f = await fixture(t);
   const first = await f.registry.connect(f.root);
