@@ -403,7 +403,7 @@ export function registerStrataa(pi, runModelTurn, createFlowView, skills, readAg
       pi.sendMessage({
         customType: CARD, display: false,
         content: `${aris ? arisHandoff(run.aris, AGENTS_DIR)
-          : `Router가 이 요청을 Solo 주도 일반 작업으로 분류했습니다. ARIS 스킬은 필요하지 않습니다. 원본 근거와 제약을 확인하고 필요한 최소 작업을 직접 수행·검증하세요. 위임 작업은 사용자가 설정한 Worker ${run.config.worker.model} · ${run.config.worker.reasoning}로 실행됩니다. 다른 모델·외부 에이전트로 우회하지 마세요. 관측과 추론, 검증하지 못한 부분을 구분하세요.${pstackHandoff()}`}\n\n${waveHandoff(decision.waves)}${projectHandoff(run.ctx.cwd)}`,
+          : `Router가 이 요청을 Solo 주도 일반 작업으로 분류했습니다. ARIS 스킬은 필요하지 않습니다. 원본 근거와 제약을 확인하고 필요한 최소 작업을 직접 수행·검증하세요. 위임 작업은 사용자가 설정한 Worker ${run.config.worker.model} · ${run.config.worker.reasoning}로 실행됩니다. 다른 모델·외부 에이전트로 우회하지 마세요. 관측과 추론, 검증하지 못한 부분을 구분하세요.`}${pstackHandoff(aris ? "brain" : "solo")}\n\n${waveHandoff(decision.waves)}${projectHandoff(run.ctx.cwd)}`,
         details: { runId: run.id, phase: "handoff", ...decision, speaker: role, ...run.config[role],
           ...(aris ? { worker: { agent: WORKER_AGENT, ...run.config.worker }, reviewer: { agent: REVIEWER_AGENT, ...run.config.reviewer }, install: run.aris.install, reviewRequired: run.aris.reviewRequired } : {}) },
       }, { triggerTurn: false, deliverAs: "nextTurn" });
@@ -656,10 +656,12 @@ export function registerStrataa(pi, runModelTurn, createFlowView, skills, readAg
       const prepared = prepareWaveCall(run.flow, event.input);
       if (run.aris) prepared.input = prepareArisCall(run.aris, prepared.input, prepared.bindings);
       const tasks = prepared.input.tasks ?? [prepared.input];
+      const workerGuidance = run.aris && tasks.some(task => task.agent === WORKER_AGENT) ? pstackHandoff("worker") : "";
       for (const task of tasks) {
         const role = task.agent === REVIEWER_AGENT ? "reviewer" : "worker";
         assertModel(ctx, run.config, role);
         task.model = taskModelSelector(run.config[role]);
+        if (run.aris && task.agent === WORKER_AGENT) task.task += workerGuidance;
       }
       run.flow.nextWaveTask = prepared.nextName;
       // Validate the whole batch before reserving any stage or name.
@@ -961,7 +963,7 @@ export function registerStrataa(pi, runModelTurn, createFlowView, skills, readAg
         try {
           const install = validatePstackInstall();
           const catalog = getPstackCatalog();
-          card(`**pstack ${install.count}개 스킬 · ${install.agents}개 에이전트**\n\nv${install.version} · commit ${install.commit}\n${install.root}\n\n${catalog.map(skill => `- \`/${skill.name}\``).join("\n")}\n\nSolo 코딩 작업은 poteto-mode와 OMP 어댑터를 적용합니다. ARIS 연구 역할·사용자 모델 설정은 유지합니다. Cursor 전용 Automation·Bugbot은 실행되지 않으며, 원본 helper 의존성은 자동 설치하지 않습니다. 스킬 설치는 PR·push·merge 권한을 추가하지 않습니다.`,
+          card(`**pstack ${install.count}개 스킬 · ${install.agents}개 에이전트**\n\nv${install.version} · commit ${install.commit}\n${install.root}\n\n${catalog.map(skill => `- \`/${skill.name}\``).join("\n")}\n\nSolo·ARIS Brain·Worker가 필요한 pstack 스킬만 선택합니다. 탐색과 문장 정리는 직접 진행하며, 의미 있는 주장 변경·비용·되돌리기 어려운 행동에 필요한 검사를 붙입니다. 사용자가 요청한 검토와 선택한 ARIS 절차는 유지합니다. Reviewer의 독립성과 기존 모델 설정은 바꾸지 않습니다. Cursor 전용 서비스·원본 helper 의존성은 자동 실행·설치하지 않습니다.`,
             { phase: "status", pstack: install, skills: catalog.map(skill => skill.name) });
         } catch (error) { ctx.ui.notify(error.message, "error"); }
         return;

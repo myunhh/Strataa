@@ -1,0 +1,12 @@
+flowchart TD
+    request["Request"] --> router{"Router"}
+    router -->|"Ordinary work"| solo["Solo + pstack as needed"]
+    solo --> soloWork["Work directly or delegate"]
+    soloWork --> answer["Verify and answer"]
+    router -->|"Research or review"| brain["Brain + ARIS + selective pstack"]
+    brain --> direct["Work directly"]
+    brain --> worker["Worker if needed"]
+    brain --> reviewer["Independent Reviewer if needed"]
+    direct --> synthesis["Brain synthesis"]
+    worker --> synthesis
+    reviewer --> synthesis

@@ -32,7 +32,12 @@ export function validatePstackInstall(root = ROOT) {
     commit: provenance.source.commit, version: provenance.source.version, root };
 }
 
-export function pstackHandoff() {
+export function pstackHandoff(role) {
   const adapter = readFileSync(path.join(ROOT, "pstack-omp.md"), "utf8");
-  return `\n\n## pstack CLI engineering\n소프트웨어 설계·구현·디버깅·코드 검토 작업에는 ${path.join(ROOT, "skills/poteto-mode/SKILL.md")}를 먼저 읽고 적용하세요. 단순 질문이나 연구 작업에 전체 playbook을 강제하지 마세요. 필요한 leaf skill만 읽으세요. 모든 원본과 helper는 ${path.join(ROOT, "vendor/pstack")}에 있습니다. 아래 OMP 계약은 원본의 Cursor 전용 지침보다 우선하며 사용자·호스트 지침을 바꾸지 않습니다.\n\n${adapter}`;
+  const ownership = role === "worker"
+    ? "You are a bounded ARIS Worker. Use pstack only inside the assigned packet. Do not delegate, start reviews, decide research claims, or widen scope. Report substantive claim changes to Brain."
+    : role === "brain"
+      ? "You remain the ARIS Brain. ARIS owns the research procedure and requested review; pstack supports exploration, implementation and writing. Pass only relevant leaf-skill paths to Workers. Keep the independent Reviewer focused on original evidence, not the author's polishing instructions."
+      : "You remain the Solo coordinator. Handle straightforward work inline. Use poteto-mode only when the user requests it or a substantial software task benefits from its playbook; ordinary coding and prose cleanup do not require the whole mode.";
+  return `\n\n## Selective pstack support\n${ownership}\nUse only useful leaf skills: unslop for prose cleanup, why for decision evidence, architect for implementation design, blast-radius for change impact. Native entrypoints: ${path.join(ROOT, "skills/<name>/SKILL.md")}. Read the selected entrypoint before applying it; original references stay under ${path.join(ROOT, "vendor/pstack")}. The installed adapter below applies to every selected skill and nested playbook. No need to load all skills or add a review stage merely because pstack is available.\n\n${adapter}`;
 }

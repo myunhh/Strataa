@@ -1,5 +1,12 @@
 # Changelog
 
+## 4.11.0 — 2026-11-16
+
+- Apply selective pstack support to Solo, ARIS Brain and bounded ARIS Worker packets. Keep Reviewer independent and retain configured models, research ownership and requested review contracts.
+- Prefer direct work for ordinary exploration and prose cleanup. Reserve targeted evidence checks for changed numbers, comparison conditions and research claims; do not add panels or full review cycles merely because a supporting skill is available.
+- Teach the Router to keep prose-only paper/report polishing in Solo without delegated stages, unless the user explicitly requests review or delegation.
+- Split documentation into English `README.md` and Korean `README.ko.md`, with localized workflow diagrams and practical research/coding examples.
+
 ## 4.10.0 — 2026-11-16
 
 - Accept Windows Explorer WSL UNC paths (`wsl.localhost` and `wsl$`) for the server's current distribution, including quoted paths. Reject other distributions and unsupported Windows shares instead of treating them as relative Linux paths. Explain when a valid project directory still needs `.strataa/project.json`.
