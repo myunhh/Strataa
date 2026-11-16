@@ -1,4 +1,4 @@
-// Model transport for fixed Terra routing; execution uses the host's native sessions.
+// Model transport for fixed Terra routing and Luna prompt summaries; execution uses native sessions.
 //
 // Runs one consultant turn through the host's own `@oh-my-pi/pi-ai` streaming
 // entrypoint (the OMP extension loader rebinds that specifier to the running
@@ -63,7 +63,7 @@ export async function runModelTurn(ctx, { speaker, model, reasoning, systemPromp
 	const auth = createAuth(ctx.modelRegistry, resolved, sessionId);
 
 	const deadline = new AbortController();
-	const timer = setTimeout(() => deadline.abort(new DialogueTurnError(`${label} exceeded ${TURN_DEADLINE_MS / 1000}s`, "timeout")), TURN_DEADLINE_MS);
+	const timer = setTimeout(() => deadline.abort(new StrataaTurnError(`${label} exceeded ${TURN_DEADLINE_MS / 1000}s`, "timeout")), TURN_DEADLINE_MS);
 	const combined = signal ? AbortSignal.any([signal, deadline.signal]) : deadline.signal;
 
 	try {
@@ -101,12 +101,12 @@ export async function runModelTurn(ctx, { speaker, model, reasoning, systemPromp
 			.filter(block => block.type === "text" && typeof block.text === "string")
 			.map(block => block.text)
 			.join("");
-		if (visible.trim() === "") throw new DialogueTurnError(`${label} returned no visible text`, "empty");
+		if (visible.trim() === "") throw new StrataaTurnError(`${label} returned no visible text`, "empty");
 		return { text: visible, usage: final.usage, stopReason: final.stopReason };
 	} catch (error) {
-		if (combined.aborted && !(error instanceof DialogueTurnError)) throw abortError(combined, label);
-		if (error instanceof DialogueTurnError) throw error;
-		throw new DialogueTurnError(`${label} request failed: ${sanitize(messageOf(error))}`, "error", { cause: error });
+		if (combined.aborted && !(error instanceof StrataaTurnError)) throw abortError(combined, label);
+		if (error instanceof StrataaTurnError) throw error;
+		throw new StrataaTurnError(`${label} request failed: ${sanitize(messageOf(error))}`, "error", { cause: error });
 	} finally {
 		deadline.abort();
 		clearTimeout(timer);
@@ -121,7 +121,7 @@ export function turnEffort(model, requested) {
 	const efforts = model.thinking?.efforts;
 	if (requested !== undefined) {
 		if (!model.reasoning || !Array.isArray(efforts) || !efforts.includes(requested)) {
-			throw new DialogueTurnError(`${model.provider}/${model.id} does not support required reasoning "${requested}"`, "config");
+			throw new StrataaTurnError(`${model.provider}/${model.id} does not support required reasoning "${requested}"`, "config");
 		}
 		return requested;
 	}
@@ -130,40 +130,40 @@ export function turnEffort(model, requested) {
 	return efforts.includes(TURN_REASONING) ? TURN_REASONING : efforts[0];
 }
 
-export class DialogueTurnError extends Error {
+export class StrataaTurnError extends Error {
 	/** @param {"aborted"|"timeout"|"error"|"length"|"toolUse"|"empty"|"config"} kind */
 	constructor(message, kind, options) {
 		super(message, options);
-		this.name = "DialogueTurnError";
+		this.name = "StrataaTurnError";
 		this.kind = kind;
 	}
 }
 
 function createAuth(registry, model, sessionId) {
 	if (typeof registry?.resolver !== "function") {
-		throw new DialogueTurnError("OMP >=18.15.0 with a model credential resolver is required", "error");
+		throw new StrataaTurnError("OMP >=18.15.0 with a model credential resolver is required", "error");
 	}
 	return registry.resolver(model, sessionId);
 }
 
 function abortError(signal, label) {
 	const reason = signal.reason;
-	if (reason instanceof DialogueTurnError) return reason;
-	return new DialogueTurnError(`${label} turn aborted`, "aborted", reason instanceof Error ? { cause: reason } : undefined);
+	if (reason instanceof StrataaTurnError) return reason;
+	return new StrataaTurnError(`${label} turn aborted`, "aborted", reason instanceof Error ? { cause: reason } : undefined);
 }
 
 function stopError(message, label) {
 	switch (message.stopReason) {
 		case "aborted":
-			return new DialogueTurnError(`${label} turn aborted`, "aborted");
+			return new StrataaTurnError(`${label} turn aborted`, "aborted");
 		case "length":
-			return new DialogueTurnError(`${label} hit the output limit before finishing`, "length");
+			return new StrataaTurnError(`${label} hit the output limit before finishing`, "length");
 		case "toolUse":
-			return new DialogueTurnError(`${label} attempted a tool call; consultants have no tools`, "toolUse");
+			return new StrataaTurnError(`${label} attempted a tool call; consultants have no tools`, "toolUse");
 		default: {
 			const status = typeof message.errorStatus === "number" ? ` (HTTP ${message.errorStatus})` : "";
 			const detail = sanitize(message.errorMessage || "provider error");
-			return new DialogueTurnError(`${label} failed${status}: ${detail}`, "error");
+			return new StrataaTurnError(`${label} failed${status}: ${detail}`, "error");
 		}
 	}
 }

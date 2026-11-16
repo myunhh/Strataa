@@ -1,5 +1,47 @@
 # Changelog
 
+## 4.7.0 — 2026-11-16
+
+- Rename the product, package, commands and first-party skill to Strataa, `omp-agent-strataa`, `/strataa` and `strataa-dashboard`; move the public repository to `myunhh/Strataa`.
+- Replace configuration names with `STRATAA_*` and `OMP_STRATAA_FLOW_DIR`. Preserve existing data directories and serialized session/Flow identities so research and running-session history remain readable; remove the old plugin registration after linking the new package.
+- Add a loopback Research Dashboard inspired by Human-Learning: per-paper PDF/text storage, quote-grounded shared field/problem/method/technique concepts, responsive SVG navigation, and portable exports.
+- Persist research BuildUp with parent links, alternatives, rationale, evidence, next checks, version history, actual skill references, and captured public Strataa flows.
+- Analyze explicitly selected sources through one pinned, tool-free OMP CLI turn. Keep generated concepts as drafts; reject unsupported quotes, broken hierarchies, input limits, provider failures, and concurrent-edit conflicts without retry or fallback.
+- Ship a first-party `strataa-dashboard` skill and `npm run dashboard`; preserve vendored ARIS provenance, existing plugin behavior, credentials, and global configuration.
+- Verify 22 focused cases across the initial run and corrected HTTP Host-boundary check, plus actual desktop/mobile browser flows and real model inference on isolated synthetic fixtures. Independent cross-family assumption review was not performed.
+- Run all 177 first-party tests: 176 passed initially; remove an obsolete reviewer-label wording assertion and pass the remaining case in a targeted rerun. Confirm the Strataa browser title, navigation and renamed skill loading without browser errors, then shut the preview down.
+
+## 4.6.0 — 2026-11-14
+
+- Require explicit stage `dependsOn` in Terra plans; reject unknown, duplicate, self and cyclic prerequisites. Derive execution Waves by dependency depth instead of array position.
+- Admit independent ready stages and models in one native task batch. Gate only on declared prerequisites' successful full public results; atomically reserve per-stage slots and a run-wide four-task cap.
+- Close producer stages once consumers start and reject producer/consumer races in the same batch. Preserve model pins, failure handling and main-owned nonrecursive delegation.
+- Show same-depth stages together, retain unstarted sibling placeholders, and show real dependency edges/details without rewriting historical sequential snapshots.
+- Scope reviewer continuity to its Terra stage so independent parallel reviews cannot contaminate one another. Completed empty results release live-task slots but never unlock dependent stages.
+- Pass 95 initial targeted Wave/controller/protocol/flow checks and 22 focused post-review checks, including mixed worker/reviewer batching, dependency joins, separate histories and concurrency reservations. These overlapping test-host checks do not prove paid model overlap.
+- Inspect the actual OMP 18.20.0 Flow at 160×36 and 60×24, including a two-branch join's prerequisite details. UI fixture events are synthetic, not worker execution evidence.
+
+## 4.5.2 — 2026-11-13
+
+- Show connected per-session graphs immediately on the watch dashboard, without selecting a session or opening its inspector. Reuse the existing Flow renderer instead of the separate depth-label list.
+- Fit shared graph previews to each session tile, retain visible/hidden-node counts, and distinguish execution stages from historical delegation depth. Keep Enter for full details and preserve honest no-Flow states.
+- Verify the initial watch surface on actual aica-1 OMP 18.20.0 terminals at 160×36 and 60×24: all six stored nodes and their connections are visible alongside the other session's unobserved state, without producer reloads or model calls.
+
+## 4.5.1 — 2026-11-13
+
+- Discover existing same-user Linux OMP processes through their open root session files, including producers started before the watch publisher was installed. Never restart, reload or write to a producer to attach.
+- Read saved public Flow records asynchronously with bounded-memory backwards discovery, unchanged-file caching and incremental appends. Prefer native snapshots, preserve completion, and exclude exited sources, nested sessions, assistant thinking and tool bodies.
+- Label saved-session evidence explicitly. Sessions without a recorded Flow show their original request and an unobserved state, not invented topology; their full input remains scrollable. Do not backfill summaries or call models from the watcher.
+- Keep explicit snapshot directories isolated from process discovery. Other platforms continue to use native published snapshots.
+- Verify 38 targeted cases (33 initially; five corrected cases plus two related cases passed targeted reruns). An actual OMP 18.19.0 watcher on aica-1 displayed both existing producers without interrupting them: six saved nodes in one session and original-input-only evidence in the other.
+
+## 4.5.0 — 2026-11-13
+
+- Add `/dialogue watch`: a read-only terminal dashboard for concurrent local OMP main sessions, with stable selection, bounded paging, existing Flow inspection, and workspace/session identity.
+- Publish private atomic snapshots independently of the session UI. Keep completed flows without an idle timeout until the next routed request, remove exited producers from discovery, and prevent session navigation or late summaries from misattributing a previous flow.
+- Generate one original-prompt summary per new routed request with exact GPT-6 Luna / low. Share it across watchers without refresh calls, preserve the full original prompt, show pending/failure honestly, and keep summary failures independent of execution. Do not regenerate restored summaries or substitute models.
+- Verify 77 targeted cases (73 initially; four fixes plus one related case passed targeted reruns). Actual OMP 18.20.0 terminals verified two producers plus a watcher, completion retention, replacement, request details, close/reopen, resize and exit handling. Three real Luna summaries accompanied explicitly synthetic router/executor events.
+
 ## 4.4.0 — 2026-11-12
 
 - Terra now designs ordered execution Waves alongside routing: stage ID, title, bounded goal and parallelism. Main-only work uses an empty plan; the router selects useful topology rather than a fixed number of stages.

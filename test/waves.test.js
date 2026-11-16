@@ -5,20 +5,19 @@ import { createFlow, expectNative, finishFlow, observeNative, planFlow } from ".
 import { parseRoute, DEFAULTS } from "../protocol.js";
 
 const stages = () => [
-  { id: "Inspect", title: "Inspect", goal: "Inspect the requested inputs", parallel: 2 },
-  { id: "Check", title: "Check", goal: "Check the collected evidence", parallel: 1 },
-  { id: "Report", title: "Report", goal: "Produce the requested artifact", parallel: 1 },
+  { id: "Inspect", title: "Inspect", goal: "Inspect the requested inputs", parallel: 2, dependsOn: [] },
+  { id: "Check", title: "Check", goal: "Check the collected evidence", parallel: 1, dependsOn: ["Inspect"] },
+  { id: "Report", title: "Report", goal: "Produce the requested artifact", parallel: 1, dependsOn: ["Check"] },
 ];
 function run(waves = stages()) {
   const flow = createFlow("waves");
-  planFlow(flow, { route: "solo", reason: "Scoped work", waves }, DEFAULTS);
+  planFlow(flow, { route: "solo", reason: "Scoped work", waves: parseWaves(waves) }, DEFAULTS);
   return flow;
 }
 function admit(flow, names) {
   const prepared = prepareWaveCall(flow, { tasks: names.map(name => ({ name, task: "Read the assigned input only." })) });
-  flow.activeWave = prepared.index;
   flow.nextWaveTask = prepared.nextName;
-  for (const task of prepared.input.tasks) expectNative(flow, "task", task.name, { ...task, parentId: "final" });
+  prepared.input.tasks.forEach((task, index) => expectNative(flow, "task", task.name, { ...task, waveId: prepared.bindings[index].waveId, parentId: "final" }));
   return prepared.input.tasks;
 }
 function complete(flow, id, more = {}) {
@@ -57,7 +56,6 @@ test("mixed/skipped/unknown stages and duplicate names cannot partially advance 
   const flow = run();
   for (const names of [["Inspect__A", "Check__B"], ["Report__Skip"], ["Unknown__A"], ["Inspect__A", "Inspect__A"]]) {
     assert.throws(() => admit(flow, names));
-    assert.equal(flow.activeWave, 0);
     assert.deepEqual(flow.rows.flatMap(row => row.jobIds), []);
   }
   admit(flow, ["Inspect__A"]);
@@ -102,4 +100,71 @@ test("main-only plans cannot start delegates, and generated names reserve real s
   const second = admit(flow, [undefined])[0].name;
   assert.notEqual(first, second);
   assert.throws(() => admit(flow, [undefined]), /concurrent/);
+});
+
+test("dependency validation groups independent stages and rejects unschedulable plans", () => {
+  const plan = [
+    { ...stages()[1], dependsOn: ["Inspect", "Data"] },
+    stages()[0],
+    { ...stages()[0], id: "Data" },
+  ];
+  assert.deepEqual(parseWaves(plan).map(stage => [stage.id, stage.wave]), [["Check", 3], ["Inspect", 2], ["Data", 2]]);
+  for (const dependsOn of [undefined, null, ["Missing"], ["Inspect"], ["Data", "Data"]]) {
+    assert.throws(() => parseWaves([{ ...stages()[0], dependsOn }, { ...stages()[0], id: "Data" }]));
+  }
+  assert.throws(() => parseWaves([
+    { ...stages()[0], dependsOn: ["Data"] },
+    { ...stages()[0], id: "Data", dependsOn: ["Inspect"] },
+  ]), /Cyclic/);
+});
+
+test("independent stages share a native batch and only declared prerequisites block consumers", () => {
+  const flow = run([stages()[0], { ...stages()[0], id: "Data" }, stages()[1]]);
+  const tasks = admit(flow, ["Inspect__Code", "Data__Evidence"]);
+  assert.deepEqual(tasks.map(task => task.name), ["Inspect__Code", "Data__Evidence"]);
+  assert.deepEqual(flow.rows.filter(row => row.jobIds.length).map(row => [row.waveId, row.wave]), [["Inspect", 2], ["Data", 2]]);
+  complete(flow, "Inspect__Code");
+  admit(flow, ["Check__Code"]);
+  assert.equal(flow.rows.find(row => row.waveId === "Check").wave, 3);
+  assert.equal(flow.rows.find(row => row.waveId === "Data").state, "pending", "unrelated active branch is not an implicit barrier");
+  assert.throws(() => admit(flow, ["Inspect__New"]), /closed/);
+});
+
+test("a join waits for both branches and cannot reopen a producer in the consumer batch", () => {
+  const flow = run([stages()[0], { ...stages()[0], id: "Data" }, { ...stages()[1], dependsOn: ["Inspect", "Data"] }]);
+  admit(flow, ["Inspect__Code", "Data__Evidence"]);
+  complete(flow, "Inspect__Code");
+  assert.throws(() => admit(flow, ["Check__Early"]), /Dependency Data/);
+  complete(flow, "Data__Evidence");
+  const before = structuredClone(flow);
+  assert.throws(() => admit(flow, ["Inspect__Again", "Check__Unsafe"]), /Dependent stages/);
+  assert.deepEqual(flow, before, "rejected mixed batch reserves no work");
+  admit(flow, ["Check__Join"]);
+});
+
+test("global concurrency is reserved across stages and ambiguous names never guess a stage", () => {
+  const flow = run([
+    { ...stages()[0], parallel: 4 },
+    { ...stages()[0], id: "Data", parallel: 4 },
+  ]);
+  assert.throws(() => admit(flow, [undefined]), /unambiguous/);
+  admit(flow, ["Inspect__A", "Inspect__B", "Data__A", "Data__B"]);
+  assert.throws(() => admit(flow, ["Data__Overflow"]), /across all Waves/);
+  complete(flow, "Inspect__A");
+  admit(flow, ["Data__Next"]);
+  assert.equal(flow.rows.filter(row => row.jobIds.length && row.state !== "completed").length, 4);
+});
+
+test("received empty results block dependents without occupying live concurrency slots", () => {
+  const flow = run([
+    { ...stages()[0], parallel: 1 },
+    { ...stages()[0], id: "Data", parallel: 4 },
+    stages()[1],
+  ]);
+  admit(flow, ["Inspect__Empty"]);
+  complete(flow, "Inspect__Empty", { output: "" });
+  assert.equal(waveComplete(flow, 0), false);
+  assert.throws(() => admit(flow, ["Check__Unsupported"]), /full public results/);
+  admit(flow, ["Data__A", "Data__B", "Data__C", "Data__D"]);
+  assert.equal(flow.rows.filter(row => row.waveId === "Data").length, 4);
 });

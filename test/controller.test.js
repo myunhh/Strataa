@@ -1,6 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { registerDialogue } from "../controller.js";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { createFlowPublisher, readFlowSessions } from "../flow-store.js";
+import { registerStrataa } from "../controller.js";
 import { FLOW } from "../flow.js";
 import { REVIEWER_AGENT, WORKER_AGENT } from "../aris-runtime.js";
 
@@ -24,7 +28,7 @@ function skillsModule(overrides = {}) {
 }
 
 function harness(runTurn, entries = [], skills = skillsModule(), readAgentOutput = undefined,
-  createFlowView = () => ({ render: () => [], invalidate() {} }), identity = { kind: "main", id: "Main" }) {
+  createFlowView = () => ({ render: () => [], invalidate() {} }), identity = { kind: "main", id: "Main" }, monitor = undefined) {
   const handlers = new Map();
   const bus = new Map();
   let liveFlow;
@@ -51,7 +55,7 @@ function harness(runTurn, entries = [], skills = skillsModule(), readAgentOutput
   const ctx = {
     cwd: "/workspace", mode: "tui", hasUI: true, agent: identity,
     models: { list: () => models, family: model => model.family, current: () => current },
-    sessionManager: { getSessionId: () => sessionId, getBranch: () => entries },
+    sessionManager: { getSessionId: () => sessionId, getSessionFile: () => `/sessions/${sessionId}.jsonl`, getBranch: () => entries },
     isIdle: () => idle,
     abort: async () => { idle = true; },
     setTimeout: callback => pending.push(callback),
@@ -91,8 +95,8 @@ function harness(runTurn, entries = [], skills = skillsModule(), readAgentOutput
       idle = false;
     },
   };
-  registerDialogue(pi, (_ctx, args) => { calls.push(args); return runTurn(args); },
-    (getFlow, ...args) => { liveFlow = getFlow; return createFlowView(getFlow, ...args); }, skills, readAgentOutput);
+  registerStrataa(pi, (_ctx, args) => { calls.push(args); return runTurn(args); },
+    (getFlow, ...args) => { liveFlow = getFlow; return createFlowView(getFlow, ...args); }, skills, readAgentOutput, monitor);
   handlers.get("session_start")({}, ctx);
   return {
     ctx, pi, entries, cards, prompts, promptModels, promptEfforts, notices, models, calls, skills,
@@ -111,7 +115,7 @@ function harness(runTurn, entries = [], skills = skillsModule(), readAgentOutput
 }
 
 const routed = decision => async () => ({ text: JSON.stringify({
-  waves: decision.route === "dialogue" ? [{ id: "Review", title: "검토", goal: "요청된 근거를 독립 검토", parallel: 4 }] : [],
+  waves: decision.route === "dialogue" ? [{ id: "Review", title: "검토", goal: "요청된 근거를 독립 검토", parallel: 4, dependsOn: [] }] : [],
   ...decision,
 }), stopReason: "stop" });
 const review = routed({ route: "dialogue", skills: ["research-review"], reason: "Independent review is useful." });
@@ -224,14 +228,14 @@ test("solo uses Astra without loading skills or a Claude account", async () => {
   assert.deepEqual(loaded, []);
 });
 
-test("Astra without max cannot enable Dialogue or start a paid request after capability disappears", async () => {
+test("Astra without max cannot enable Strataa or start a paid request after capability disappears", async () => {
   for (const stage of ["enable", "input"]) {
     const h = harness(solo);
     if (stage === "input") await h.command("on");
     h.models.find(model => model.id === "gpt-6-astra").thinking.efforts = ["low", "high", "xhigh"];
     if (stage === "enable") {
       await h.command("on");
-      assert.equal(h.input("ordinary task"), undefined, "Dialogue remains off");
+      assert.equal(h.input("ordinary task"), undefined, "Strataa remains off");
     } else {
       assert.deepEqual(h.input("ordinary task"), { handled: true });
       await h.flush();
@@ -786,7 +790,7 @@ test("in-place compaction preserves an ARIS run and accepts its pending reviewer
   assert.equal(latestFlow(h).status, "cancelled");
 });
 
-test("/dialogue skills lists the installed catalog with readiness and no agent-era aliases", async () => {
+test("/strataa skills lists the installed catalog with readiness and no agent-era aliases", async () => {
   const h = harness(review);
   await h.command("skills");
   const listing = h.cards.at(-1);
@@ -795,7 +799,7 @@ test("/dialogue skills lists the installed catalog with readiness and no agent-e
   const cardsBefore = h.cards.length;
   await h.command("agents");
   assert.equal(h.cards.length, cardsBefore);
-  assert.match(h.notices.at(-1)[0], /\/dialogue skills/);
+  assert.match(h.notices.at(-1)[0], /\/strataa skills/);
 });
 
 const automaticDelivery = (id, content = "host delivery") => ({ message: {
@@ -934,7 +938,7 @@ test("generic automatic delivery fills complete public results in solo and ARIS 
 
 test("native staged agents retain public streaming output while eval spawning is refused", async () => {
   const h = harness(routed({ route: "solo", reason: "Inspect", waves: [
-    { id: "Inspect", title: "Inspect", goal: "Inspect requested inputs", parallel: 1 },
+    { id: "Inspect", title: "Inspect", goal: "Inspect requested inputs", parallel: 1, dependsOn: [] },
   ] }), [], skillsModule(), async () => "Full eval agent output\nEND-EVAL");
   await h.command("on");
   h.input("Inspect using native task.");
@@ -1031,8 +1035,8 @@ test("foreign, cancelled and replaced factory events cannot contaminate the curr
 
 test("Terra stages reserve parallel capacity and cannot advance until every public result arrives", async () => {
   const h = harness(routed({ route: "solo", reason: "Inspect then check", waves: [
-    { id: "Inspect", title: "Inspect", goal: "Collect independent inputs", parallel: 2 },
-    { id: "Check", title: "Check", goal: "Check the collected inputs", parallel: 1 },
+    { id: "Inspect", title: "Inspect", goal: "Collect independent inputs", parallel: 2, dependsOn: [] },
+    { id: "Check", title: "Check", goal: "Check the collected inputs", parallel: 1, dependsOn: ["Inspect"] },
   ] }));
   await h.command("on");
   h.input("Use two execution stages.");
@@ -1066,4 +1070,291 @@ test("Terra stages reserve parallel capacity and cannot advance until every publ
   ] } });
   h.event("agent_end", { messages: [{ role: "assistant", stopReason: "stop", content: [] }] });
   assert.equal(latestFlow(h).status, "completed");
+});
+
+test("one native batch admits independent worker and reviewer models in the same Wave", async () => {
+  const h = await startedReview(routed({ route: "dialogue", reason: "Independent inputs", waves: [
+    { id: "Collect", title: "Collect", goal: "Collect separate background sources", parallel: 1, dependsOn: [] },
+    { id: "Review", title: "Review", goal: "Review unchanged supplied evidence", parallel: 1, dependsOn: [] },
+    { id: "Join", title: "Join", goal: "Check both completed outputs", parallel: 1, dependsOn: ["Collect", "Review"] },
+  ] }));
+  const admitted = h.event("tool_call", { toolName: "task", input: { tasks: [
+    { name: "Collect__Sources", agent: WORKER_AGENT, task: "Collect sources in a separate output." },
+    { name: "Review__Existing", agent: REVIEWER_AGENT, task: "Read only the unchanged supplied evidence." },
+  ] } });
+  assert.equal(admitted.block, undefined);
+  assert.deepEqual(admitted.input.tasks.map(task => task.name), ["Collect__Sources", "Review__Existing"]);
+  assert.deepEqual(latestFlow(h).rows.filter(row => row.jobIds.length).map(row => [row.wave, row.waveId]),
+    [[2, "Collect"], [2, "Review"]]);
+  for (const task of admitted.input.tasks) {
+    const policy = h.event("before_subagent_spawn", { agent: task.agent, invocationKind: "task" });
+    assert.equal(policy.model, task.agent === WORKER_AGENT ? "anthropic/claude-opus-5-5:medium" : `${ASTRA}:max`);
+  }
+  h.event("tool_execution_start", { toolCallId: "parallel", toolName: "task", args: admitted.input });
+  const join = () => h.event("tool_call", { toolName: "task", input: { name: "Join__Evidence", task: "Check completed outputs." } });
+  assert.equal(join().block, true);
+  await h.event("tool_result", { toolCallId: "parallel", toolName: "task", content: [], details: { results: [
+    { id: "Collect__Sources", agent: WORKER_AGENT, status: "completed", resolvedModelIdentity: "anthropic/claude-opus-5-5", output: "Sources collected." },
+  ] } });
+  assert.equal(join().block, true);
+  await h.event("tool_result", { toolCallId: "parallel", toolName: "task", content: [], details: { results: [
+    reviewerResult("Review__Existing"),
+  ] } });
+  assert.equal(join().block, undefined);
+  assert.equal(latestFlow(h).rows.find(row => row.waveId === "Join").wave, 3);
+});
+
+function monitorDirectory(t) {
+  const directory = mkdtempSync(path.join(tmpdir(), "dialogue-monitor-controller-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  return directory;
+}
+const monitored = (runTurn, monitor, entries = [], identity = undefined) =>
+  harness(runTurn, entries, skillsModule(), undefined, undefined, identity, monitor);
+
+test("two main sources retain completion until their next request and shutdown removes only the owner", async t => {
+  const directory = monitorDirectory(t);
+  const firstPublisher = createFlowPublisher({ directory });
+  const secondPublisher = createFlowPublisher({ directory });
+  t.after(() => { firstPublisher.close(); secondPublisher.close(); });
+  const first = monitored(solo, { publisher: firstPublisher });
+  const second = monitored(solo, { publisher: secondPublisher });
+  second.changeSession("second");
+  second.event("session_switch");
+  for (const [h, text] of [[first, "First question"], [second, "Second question"]]) {
+    await h.command("on");
+    h.input(text);
+    await h.flush();
+    h.event("agent_end", { messages: [{ role: "assistant", stopReason: "stop" }] });
+  }
+  const sessions = readFlowSessions({ directory });
+  assert.equal(sessions.length, 2);
+  assert.equal(sessions.every(session => session.flow.status === "completed"), true);
+  const original = sessions.find(session => session.sessionId === "original");
+  assert.equal(original.sessionFile, "/sessions/original.jsonl");
+  assert.equal(first.input("extension steering", { source: "extension" }), undefined);
+  assert.equal(first.input("ordinary native steering"), undefined);
+  await first.command("off");
+  await first.command("status");
+  assert.deepEqual(readFlowSessions({ directory }).find(session => session.key === original.key).flow, original.flow);
+  first.setIdle(true);
+  await first.command("on");
+  first.input("Replacement question");
+  const replacement = readFlowSessions({ directory }).find(session => session.key === original.key);
+  assert.notEqual(replacement.flow.id, original.flow.id);
+  assert.equal(replacement.flow.request, "Replacement question");
+  assert.equal(replacement.flow.status, "running");
+  assert.deepEqual(readFlowSessions({ directory }).find(session => session.sessionId === "second").flow,
+    sessions.find(session => session.sessionId === "second").flow);
+  await first.event("session_shutdown");
+  assert.deepEqual(readFlowSessions({ directory }).map(session => session.sessionId), ["second"]);
+  await second.event("session_shutdown");
+  assert.deepEqual(readFlowSessions({ directory }), []);
+});
+
+test("session restore publishes the selected session, never an old flow under its new identity", async () => {
+  const published = [];
+  const h = monitored(solo, { publisher: { publish: info => published.push(structuredClone(info)), close() {} } });
+  await h.command("on");
+  h.input("Old session question");
+  await h.flush();
+  h.changeSession("empty-session");
+  h.entries.splice(0);
+  h.event("session_switch");
+  assert.equal(published.at(-1).sessionId, "empty-session");
+  assert.equal(published.at(-1).flow, null);
+  for (const info of published.filter(info => info.flow)) {
+    assert.equal(info.sessionId, "original");
+    assert.equal(info.sessionFile, "/sessions/original.jsonl");
+  }
+  assert.equal(h.flow(), undefined);
+});
+
+test("child factories cannot publish or close another main source", async () => {
+  let published = 0;
+  let closed = 0;
+  let watched = 0;
+  const monitor = { publisher: { publish() { published++; }, close() { closed++; } }, createWatch() { watched++; } };
+  const child = monitored(solo, monitor, [], { kind: "task", id: "Child", parentId: "Main" });
+  await child.command("watch");
+  await child.command("on");
+  child.input("Child task");
+  child.event("session_switch");
+  await child.event("session_shutdown");
+  assert.equal(published, 0);
+  assert.equal(closed, 0);
+  assert.equal(watched, 0);
+  assert.deepEqual(child.calls, []);
+});
+
+test("publisher failures notify once and never prevent router or executor handoff", async () => {
+  const h = monitored(solo, { publisher: {
+    publish() { throw new Error("EACCES: flow registry"); },
+    close() { throw new Error("EACCES: flow registry"); },
+  } });
+  await h.command("on");
+  h.input("Continue despite a monitor disk failure");
+  await h.flush();
+  assert.deepEqual(h.promptModels, [ASTRA]);
+  assert.equal(h.calls.length, 1);
+  assert.equal(h.notices.filter(([message]) => message.includes("EACCES")).length, 1);
+  await h.event("session_shutdown");
+  assert.equal(h.notices.filter(([message]) => message.includes("EACCES")).length, 1);
+});
+
+test("watch opens fullscreen while off with no own flow or credentials, without model calls", async () => {
+  let options;
+  let disposed = 0;
+  let customOptions;
+  let closed = 0;
+  const h = monitored(() => { throw new Error("No model calls allowed"); }, {
+    createWatch: (_theme, value) => {
+      options = value;
+      return { render: () => [], handleInput() {}, invalidate() {}, dispose() { disposed++; } };
+    },
+    publisher: { publish() {}, close() { closed++; } },
+  });
+  h.models.splice(0);
+  h.ctx.ui.custom = (factory, value) => new Promise(resolve => {
+    customOptions = value;
+    factory({ terminal: { rows: 40 }, requestRender() {} }, undefined, {}, resolve);
+  });
+  const viewing = h.command("watch");
+  assert.equal(customOptions.overlayOptions.fullscreen, true);
+  assert.equal(options.getHeight(), 40);
+  assert.equal(h.flow(), undefined);
+  options.onClose();
+  await viewing;
+  assert.equal(disposed, 1);
+  assert.equal(closed, 0);
+  assert.deepEqual(h.calls, []);
+  assert.deepEqual(h.prompts, []);
+  assert.deepEqual(h.cards, []);
+});
+
+test("watcher input and close never cancel its producer; navigation disposes only its panel", async () => {
+  const hold = heldTurn();
+  let options;
+  let disposed = 0;
+  const h = monitored(hold.run, {
+    createWatch: (_theme, value) => {
+      options = value;
+      return { render: () => [], handleInput() {}, invalidate() {}, dispose() { disposed++; } };
+    },
+  });
+  h.ctx.ui.custom = factory => new Promise(resolve => {
+    factory({ terminal: { rows: 40 }, requestRender() {} }, undefined, {}, resolve);
+  });
+  await h.command("on");
+  h.input("A routed request");
+  const routing = h.flush();
+  const viewing = h.command("watch");
+  assert.equal(h.press("\x03"), undefined);
+  assert.equal(hold.signal.aborted, false);
+  options.onClose();
+  await viewing;
+  assert.equal(hold.signal.aborted, false);
+  assert.equal(disposed, 1);
+  const navigating = h.command("watch");
+  await h.event("session_before_switch");
+  await navigating;
+  assert.equal(disposed, 2);
+  hold.release();
+  await routing;
+});
+
+test("a slow prompt summary survives execution completion but cannot overwrite the next request", async () => {
+  const pending = [];
+  const h = monitored(solo, {
+    summaryModel: "openai-codex/gpt-6-luna",
+    summarizePrompt: (_ctx, options) => {
+      const result = deferred();
+      pending.push({ ...result, options });
+      return result.promise;
+    },
+  });
+  await h.command("on");
+  h.input("First original prompt", { images: [{ type: "image", data: "not-for-summary" }] });
+  assert.equal(pending.length, 1);
+  assert.deepEqual(Object.keys(pending[0].options).sort(), ["imageCount", "signal", "text"]);
+  assert.equal(pending[0].options.text, "First original prompt");
+  assert.equal(pending[0].options.imageCount, 1);
+  await h.flush();
+  h.event("agent_end", { messages: [{ role: "assistant", stopReason: "stop" }] });
+  assert.equal(latestFlow(h).status, "completed");
+  assert.equal(pending[0].options.signal.aborted, false, "completion must not abort the current summary");
+  pending[0].resolve({ model: "openai-codex/gpt-6-luna", text: "First one-line summary" });
+  await Promise.resolve();
+  assert.equal(latestFlow(h).promptSummary.text, "First one-line summary");
+  assert.equal(latestFlow(h).status, "completed");
+  h.setIdle(true);
+  h.input("Second original prompt");
+  await h.flush();
+  h.event("agent_end", { messages: [{ role: "assistant", stopReason: "stop" }] });
+  h.setIdle(true);
+  h.input("Third original prompt");
+  assert.equal(pending[1].options.signal.aborted, true, "replacement aborts a pending summary even after main completion");
+  const third = structuredClone(latestFlow(h));
+  pending[1].resolve({ model: "openai-codex/gpt-6-luna", text: "Stale second summary" });
+  await Promise.resolve();
+  assert.deepEqual(latestFlow(h), third);
+  assert.equal(pending.length, 3);
+  await h.event("session_shutdown");
+  assert.equal(pending[2].options.signal.aborted, true);
+  pending[2].resolve({ model: "openai-codex/gpt-6-luna", text: "Late shutdown summary" });
+  await Promise.resolve();
+  assert.notEqual(latestFlow(h).promptSummary.text, "Late shutdown summary");
+});
+
+test("prompt summary failures remain visible without failing routing and navigation invalidates late summaries", async () => {
+  const pending = deferred();
+  const h = monitored(solo, {
+    summaryModel: "openai-codex/gpt-6-luna",
+    summarizePrompt: async () => { throw new Error("Luna unavailable"); },
+  });
+  await h.command("on");
+  h.input("Run without the optional summary");
+  await h.flush();
+  assert.deepEqual(h.promptModels, [ASTRA]);
+  assert.equal(latestFlow(h).promptSummary.status, "failed");
+  assert.equal(latestFlow(h).promptSummary.error, "Luna unavailable");
+  await h.event("session_shutdown");
+  const navigated = monitored(solo, {
+    summaryModel: "openai-codex/gpt-6-luna", summarizePrompt: () => pending.promise,
+  });
+  await navigated.command("on");
+  navigated.input("Do not relabel this summary after navigation");
+  await navigated.flush();
+  await navigated.event("session_before_switch");
+  navigated.changeSession("new");
+  navigated.entries.splice(0);
+  navigated.event("session_switch");
+  const count = navigated.entries.length;
+  pending.resolve({ model: "openai-codex/gpt-6-luna", text: "Old summary" });
+  await Promise.resolve();
+  assert.equal(navigated.entries.length, count);
+  assert.equal(navigated.flow(), undefined);
+});
+
+test("restoring an unfinished prompt summary reports unavailable without another model call", async () => {
+  const pending = deferred();
+  let summaries = 0;
+  const monitor = {
+    summaryModel: "openai-codex/gpt-6-luna",
+    summarizePrompt: () => { summaries++; return pending.promise; },
+  };
+  const source = monitored(solo, monitor);
+  await source.command("on");
+  source.input("A prompt with a slow summary");
+  await source.flush();
+  source.event("agent_end", { messages: [{ role: "assistant", stopReason: "stop" }] });
+  const restored = monitored(solo, monitor, structuredClone(source.entries));
+  assert.equal(summaries, 1);
+  assert.equal(latestFlow(restored).status, "completed");
+  assert.equal(latestFlow(restored).promptSummary.status, "failed");
+  assert.match(latestFlow(restored).promptSummary.error, /복원/);
+  assert.deepEqual(restored.calls, []);
+  await source.event("session_shutdown");
+  pending.resolve({ model: "openai-codex/gpt-6-luna", text: "Late summary" });
+  await Promise.resolve();
 });

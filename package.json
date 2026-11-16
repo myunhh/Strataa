@@ -1,15 +1,16 @@
 {
-  "name": "omp-agent-dialogue",
-  "version": "4.4.0",
+  "name": "omp-agent-strataa",
+  "version": "4.7.0",
   "private": true,
-  "description": "ARIS-based OMP plugin with Terra-designed execution waves, a Fable brain, native Opus workers and independent Astra review",
-  "homepage": "https://github.com/myunhh/dialogue-harness",
-  "repository": { "type": "git", "url": "https://github.com/myunhh/dialogue-harness.git" },
+  "description": "Strataa research dashboard and ARIS-based OMP harness with shared concepts, versioned BuildUp and dependency-aware Waves",
+  "homepage": "https://github.com/myunhh/Strataa",
+  "repository": { "type": "git", "url": "https://github.com/myunhh/Strataa.git" },
   "type": "module",
-  "engines": { "node": ">=22" },
+  "engines": { "node": ">=22.13" },
   "omp": { "extensions": ["./index.js"] },
   "scripts": {
     "test": "node --test test/*.test.js",
+    "dashboard": "node dashboard/server.js",
     "install:user": "node install.mjs"
   }
 }

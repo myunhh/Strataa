@@ -38,17 +38,17 @@ test("task calls: legacy helpers refused, owned-agent overrides stripped, review
   assert.throws(() => prepareArisCall(aris, { agent: REVIEWER_AGENT }), /review task text/);
   assert.throws(() => prepareArisCall(aris, { agent: WORKER_AGENT }), /work packet text/);
   assert.throws(() => prepareArisCall(aris, "nope"), /must be an object/);
-  const first = prepareArisCall(aris, { name: "R1", agent: REVIEWER_AGENT, task: "Review /w/brief.md", model: "anthropic/claude-opus-4-6", tools: ["bash"], outputSchema: {}, schemaMode: "strict" });
+  const first = prepareArisCall(aris, { name: "R1", agent: REVIEWER_AGENT, task: "Review /w/brief.md", model: "anthropic/claude-opus-4-6", tools: ["bash"], outputSchema: {}, schemaMode: "strict" }, [{ name: "R1", waveId: "Review" }]);
   assert.deepEqual(first, { name: "R1", agent: REVIEWER_AGENT, task: "Review /w/brief.md" });
   const packet = prepareArisCall(aris, { name: "W1", agent: WORKER_AGENT, task: "Implement /w/tool.py", model: "x/y", tools: ["task"], outputSchema: {}, schemaMode: "strict", isolated: true });
   assert.deepEqual(Object.keys(packet).sort(), ["agent", "isolated", "name", "task"]);
 
-  assert.equal(recordReview(aris, { id: "R1", output: "  " }, DEFAULTS.astra), false);
-  assert.equal(recordReview(aris, { id: "R1", output: "Round one findings" }, DEFAULTS.astra), true);
-  assert.equal(recordReview(aris, { id: "R1", output: "duplicate" }, DEFAULTS.astra), false);
-  assert.equal(recordReview(aris, { id: "R2", structured: { status: "valid", data: { summary: "structured round" } } }, DEFAULTS.astra), true);
-  assert.equal(recordReview(aris, { id: "R3", structured: { status: "invalid", data: { summary: "x" } } }, DEFAULTS.astra), false);
-  const next = prepareArisCall(aris, { context: "shared", tasks: [plain, { name: "R3", agent: REVIEWER_AGENT, task: "Re-review" }, { name: "W2", agent: WORKER_AGENT, task: "Collect numbers", model: "x/y" }] });
+  assert.equal(recordReview(aris, { id: "R1", output: "  " }, DEFAULTS.astra, "Review"), false);
+  assert.equal(recordReview(aris, { id: "R1", output: "Round one findings" }, DEFAULTS.astra, "Review"), true);
+  assert.equal(recordReview(aris, { id: "R1", output: "duplicate" }, DEFAULTS.astra, "Review"), false);
+  assert.equal(recordReview(aris, { id: "R2", structured: { status: "valid", data: { summary: "structured round" } } }, DEFAULTS.astra, "Review"), true);
+  assert.equal(recordReview(aris, { id: "R3", structured: { status: "invalid", data: { summary: "x" } } }, DEFAULTS.astra, "Review"), false);
+  const next = prepareArisCall(aris, { context: "shared", tasks: [plain, { name: "R3", agent: REVIEWER_AGENT, task: "Re-review" }, { name: "W2", agent: WORKER_AGENT, task: "Collect numbers", model: "x/y" }] }, [{ name: "R3", waveId: "Review" }]);
   assert.equal(next.tasks[0], plain);
   assert.equal(next.context, "shared");
   assert.match(next.tasks[1].task, /^Re-review\n\n## 이전 검토 라운드/);
@@ -100,8 +100,8 @@ test("hydration reads only the referenced id, keeps the whole output and fails o
   assert.equal(hydrated.status, "completed");
   assert.equal(reviewOutput(hydrated), FULL);
   const aris = run();
-  assert.equal(recordReview(aris, hydrated, DEFAULTS.astra), true);
-  assert.ok(prepareArisCall(aris, { name: "R2", agent: REVIEWER_AGENT, task: "next" }).task.endsWith("END"));
+  assert.equal(recordReview(aris, hydrated, DEFAULTS.astra, "Review"), true);
+  assert.ok(prepareArisCall(aris, { name: "R2", agent: REVIEWER_AGENT, task: "next" }, [{ name: "R2", waveId: "Review" }]).task.endsWith("END"));
 
   const plain = { id: "R1", output: "inline" };
   assert.equal(await hydrateReview(plain, async () => { throw new Error("never"); }), plain, "inline items pass through untouched");
@@ -115,5 +115,21 @@ test("hydration reads only the referenced id, keeps the whole output and fails o
   assert.equal(reviewOutput(failing), "");
   assert.match((await hydrateReview(item, async () => "\n  ")).error, /본문이 비어 있음/);
   assert.match((await hydrateReview(item, async () => "## 다른 문서\n\n내용")).error, /미리보기와 일치하지 않음/);
-  assert.equal(recordReview(run(), failing, DEFAULTS.astra), false);
+  assert.equal(recordReview(run(), failing, DEFAULTS.astra, "Review"), false);
+});
+
+test("independent reviewer stages keep separate histories and require validated bindings", () => {
+  const aris = run();
+  assert.equal(recordReview(aris, { id: "Left__One", output: "LEFT findings" }, DEFAULTS.astra, "Left"), true);
+  assert.equal(recordReview(aris, { id: "Right__One", output: "RIGHT findings" }, DEFAULTS.astra, "Right"), true);
+  const prepared = prepareArisCall(aris, { tasks: [
+    { name: "Left__Two", agent: REVIEWER_AGENT, task: "Re-review left" },
+    { name: "Right__Two", agent: REVIEWER_AGENT, task: "Re-review right" },
+  ] }, [{ name: "Left__Two", waveId: "Left" }, { name: "Right__Two", waveId: "Right" }]);
+  assert.match(prepared.tasks[0].task, /LEFT findings/);
+  assert.doesNotMatch(prepared.tasks[0].task, /RIGHT findings/);
+  assert.match(prepared.tasks[1].task, /RIGHT findings/);
+  assert.doesNotMatch(prepared.tasks[1].task, /LEFT findings/);
+  assert.throws(() => prepareArisCall(aris, { name: "Unbound", agent: REVIEWER_AGENT, task: "Review" }), /validated Terra stage/);
+  assert.equal(recordReview(aris, { id: "Unbound", output: "findings" }, DEFAULTS.astra), false);
 });

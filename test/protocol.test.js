@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { collectContext, normalizeConfig, parseRoute, routeRequest, DEFAULT_REVIEW_SKILL, DialogueAbortError, DialogueConfigError } from "../protocol.js";
+import { collectContext, normalizeConfig, parseRoute, routeRequest, DEFAULT_REVIEW_SKILL, StrataaAbortError, StrataaConfigError } from "../protocol.js";
 
 const response = text => ({ text, stopReason: "stop" });
 const catalog = [
@@ -13,7 +13,7 @@ const catalog = [
 
 test("role selectors are validated and unknown keys are dropped", () => {
 	for (const role of ["fable", "astra", "opus"]) {
-		assert.throws(() => normalizeConfig({ [role]: "no-provider" }), DialogueConfigError);
+		assert.throws(() => normalizeConfig({ [role]: "no-provider" }), StrataaConfigError);
 	}
 	assert.deepEqual(normalizeConfig({ fable: "anthropic/claude-fable-5-2", astra: "openai/gpt-c-astra", opus: "anthropic/claude-opus-5-5", claude: "x" }),
 		{ fable: "anthropic/claude-fable-5-2", astra: "openai/gpt-c-astra", opus: "anthropic/claude-opus-5-5" });
@@ -50,7 +50,7 @@ test("routing cancelled during inference cannot return a late successful decisio
 			abort.abort();
 			return response('{"route":"solo","reason":"routine"}');
 		},
-	}), DialogueAbortError);
+	}), StrataaAbortError);
 });
 
 test("collectContext keeps recent text, drops thinking/tool/state cards, honours compaction and size bound", () => {
@@ -70,7 +70,7 @@ test("collectContext keeps recent text, drops thinking/tool/state cards, honours
 			},
 		},
 		{ type: "message", message: { role: "toolResult", content: [{ type: "text", text: "TOOL-OUTPUT" }] } },
-		{ type: "custom_message", customType: "agent-dialogue-status", content: "OLD DIALOGUE CARD" },
+		{ type: "custom_message", customType: "agent-dialogue-status", content: "OLD STRATAA CARD" },
 		{ type: "custom_message", customType: "memo", content: [{ type: "text", text: "kept note" }] },
 		{ type: "model_usage", model: "m", usage: {} },
 	];
@@ -83,7 +83,7 @@ test("collectContext keeps recent text, drops thinking/tool/state cards, honours
 	assert.doesNotMatch(ctx, /SECRET-THOUGHT/);
 	assert.doesNotMatch(ctx, /rm -rf/);
 	assert.doesNotMatch(ctx, /TOOL-OUTPUT/);
-	assert.doesNotMatch(ctx, /OLD DIALOGUE CARD/);
+	assert.doesNotMatch(ctx, /OLD STRATAA CARD/);
 
 	// Oversized history: newest kept, oldest dropped, hard bound respected.
 	const big = Array.from({ length: 50 }, (_, i) => ({

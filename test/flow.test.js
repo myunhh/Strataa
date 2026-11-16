@@ -61,7 +61,6 @@ test("every reviewer job is its own observed round; agent-less wait snapshots ne
   assert.equal(reviews(flow)[0].summary, "found gaps");
   expectNative(flow, REVIEWER_AGENT, "Round2");
   assert.equal(reviews(flow).length, 2);
-  assert.match(reviews(flow)[1].label, /라운드 2/);
   observeNative(flow, jobs("Round2", "running"));
   assert.equal(reviews(flow)[1].state, "running");
   assert.equal(expectNative(flow, REVIEWER_AGENT, "Round2"), false, "idempotent");

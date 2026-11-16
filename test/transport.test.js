@@ -4,10 +4,10 @@ import { register } from "node:module";
 
 // transport.js statically imports the host-rebound `@oh-my-pi/pi-ai`; outside
 // the OMP loader that specifier does not exist. Route it to an in-process stub
-// whose stream is scripted per test via `globalThis.__dialogueStreamScript`.
+// whose stream is scripted per test via `globalThis.__strataaStreamScript`.
 const stubSource = `
 export function streamSimple(model, context, options) {
-	const script = globalThis.__dialogueStreamScript;
+	const script = globalThis.__strataaStreamScript;
 	return script(model, context, options);
 }
 `;
@@ -25,7 +25,7 @@ export async function load(url, context, next) {
 	import.meta.url,
 );
 
-const { runModelTurn, resolveSpeakerModel, sanitize, DialogueTurnError } = await import(
+const { runModelTurn, resolveSpeakerModel, sanitize, StrataaTurnError } = await import(
 	"../transport.js"
 );
 
@@ -63,7 +63,7 @@ async function* events(list) {
 	for (const e of list) yield e;
 }
 function scripted(list, { onOptions } = {}) {
-	globalThis.__dialogueStreamScript = (m, context, options) => {
+	globalThis.__strataaStreamScript = (m, context, options) => {
 		onOptions?.(m, context, options);
 		const stream = events(list);
 		const terminal = list.at(-1);
@@ -108,11 +108,11 @@ test("unsupported required reasoning rejects before inference instead of silentl
 	for (const extra of [{ thinking: { efforts: ["low", "high"] } }, { reasoning: false }, { thinking: undefined }]) {
 		const terra = model("openai-codex", "gpt-6.1-terra", "openai", extra);
 		let opened = false;
-		globalThis.__dialogueStreamScript = () => { opened = true; };
+		globalThis.__strataaStreamScript = () => { opened = true; };
 		await assert.rejects(runModelTurn(ctxWith([terra]), {
 			speaker: "router", model: "openai-codex/gpt-6.1-terra", reasoning: "xhigh",
 			systemPrompt: "routing", messages: [],
-		}), error => error instanceof DialogueTurnError && error.kind === "config");
+		}), error => error instanceof StrataaTurnError && error.kind === "config");
 		assert.equal(opened, false);
 	}
 });
@@ -150,7 +150,7 @@ test("non-stop outcomes reject honestly with a sanitized detail", async () => {
 	const run = () => runModelTurn(ctx, args);
 
 	scripted([{ type: "text_delta", contentIndex: 0, delta: "partial" }, done([{ type: "text", text: "partial" }], "length")]);
-	await assert.rejects(run, err => err instanceof DialogueTurnError && err.kind === "length");
+	await assert.rejects(run, err => err instanceof StrataaTurnError && err.kind === "length");
 
 	scripted([done([{ type: "toolCall", id: "1", name: "bash", arguments: {} }], "toolUse")]);
 	await assert.rejects(run, err => err.kind === "toolUse");
@@ -178,7 +178,7 @@ test("non-stop outcomes reject honestly with a sanitized detail", async () => {
 	scripted([done([{ type: "text", text: "   " }])]);
 	await assert.rejects(run, err => err.kind === "empty");
 
-	globalThis.__dialogueStreamScript = () => {
+	globalThis.__strataaStreamScript = () => {
 		throw new Error("fetch failed: token=abcdefghijklmnopqrstuvwxyz");
 	};
 	await assert.rejects(run, err => {
@@ -192,7 +192,7 @@ test("caller abort rejects as aborted even when the provider stream ends normall
 	const ctx = ctxWith([claude]);
 	const controller = new AbortController();
 	let aborted = false;
-	globalThis.__dialogueStreamScript = (m, context, options) => {
+	globalThis.__strataaStreamScript = (m, context, options) => {
 		options.signal.addEventListener("abort", () => (aborted = true));
 		const stream = (async function* () {
 			yield { type: "text_delta", contentIndex: 0, delta: "first" };
@@ -212,7 +212,7 @@ test("caller abort rejects as aborted even when the provider stream ends normall
 			signal: controller.signal,
 			onDelta: d => deltas.push(d),
 		}),
-		err => err instanceof DialogueTurnError && err.kind === "aborted",
+		err => err instanceof StrataaTurnError && err.kind === "aborted",
 	);
 	assert.equal(aborted, true, "abort propagates to the provider signal");
 	assert.deepEqual(deltas, ["first"]);
@@ -220,7 +220,7 @@ test("caller abort rejects as aborted even when the provider stream ends normall
 	const pre = new AbortController();
 	pre.abort();
 	let called = false;
-	globalThis.__dialogueStreamScript = () => {
+	globalThis.__strataaStreamScript = () => {
 		called = true;
 	};
 	await assert.rejects(

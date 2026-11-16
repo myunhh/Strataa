@@ -17,6 +17,7 @@ export const DEFAULTS = Object.freeze({
 
 export const ROLES = Object.freeze({
 	router: { label: "Terra", family: "openai", pattern: /^gpt-6\.1-terra$/ },
+	summary: { label: "Luna", duty: "요청 요약", reasoning: "low", family: "openai", pattern: /^gpt-6-luna$/ },
 	fable: { label: "Fable", duty: "Brain · 분석·아이디어·종합", reasoning: "high", family: "anthropic", pattern: /^claude-fable-/ },
 	opus: { label: "Opus", duty: "Worker · 구현·실행·검증", reasoning: "medium", family: "anthropic", pattern: /^claude-opus-/ },
 	astra: { label: "Astra", duty: "독립 검토 · 일반 작업", reasoning: "max", family: "openai", pattern: /^gpt-.*-astra$/ },
@@ -28,23 +29,23 @@ export function matchesRole(role, model, family) {
 	return !!spec && family.toLowerCase() === spec.family && (!spec.pattern || spec.pattern.test(model.id));
 }
 
-/** Custom-message types written by this extension; never fed back as context. */
-export const DIALOGUE_CUSTOM_TYPE_PREFIX = "agent-dialogue";
+/** Persisted wire prefix stays stable across the Strataa rename; never fed back as context. */
+export const STRATAA_CUSTOM_TYPE_PREFIX = "agent-dialogue";
 
 const PER_ENTRY_CHARS = 4000;
 const TRUNCATED = "…[truncated]";
 
-export class DialogueAbortError extends Error {
-	constructor(message = "Dialogue aborted") {
+export class StrataaAbortError extends Error {
+	constructor(message = "Strataa aborted") {
 		super(message);
-		this.name = "DialogueAbortError";
+		this.name = "StrataaAbortError";
 	}
 }
 
-export class DialogueConfigError extends Error {
+export class StrataaConfigError extends Error {
 	constructor(message) {
 		super(message);
-		this.name = "DialogueConfigError";
+		this.name = "StrataaConfigError";
 	}
 }
 
@@ -55,7 +56,7 @@ export function normalizeConfig(config = {}) {
 	for (const role of SELECTABLE_ROLES) {
 		const value = src[role] ?? DEFAULTS[role];
 		if (typeof value !== "string" || !/^[^/\s]+\/\S+$/.test(value)) {
-			throw new DialogueConfigError(`config.${role} must be a "provider/model-id" string, got ${JSON.stringify(value)}`);
+			throw new StrataaConfigError(`config.${role} must be a "provider/model-id" string, got ${JSON.stringify(value)}`);
 		}
 		result[role] = value;
 	}
@@ -114,7 +115,7 @@ export function collectContext(entries, maxChars = 24000) {
 				break;
 			}
 			case "custom_message": {
-				if (typeof entry.customType === "string" && entry.customType.startsWith(DIALOGUE_CUSTOM_TYPE_PREFIX)) break;
+				if (typeof entry.customType === "string" && entry.customType.startsWith(STRATAA_CUSTOM_TYPE_PREFIX)) break;
 				const text = textOf(entry.content).trim();
 				if (!text) break;
 				items.push(`Note (${entry.customType ?? "custom"}): ${text}`);
@@ -163,7 +164,7 @@ function requestMessages({ prompt, images = [], context = "", cwd }) {
 }
 
 function throwIfAborted(signal) {
-	if (signal?.aborted) throw new DialogueAbortError();
+	if (signal?.aborted) throw new StrataaAbortError();
 }
 
 function visibleResult(result, label) {
@@ -226,12 +227,12 @@ Select the smallest useful set of 1–${MAX_SKILLS} installed skills matching th
 - Other installed skills may be selected when they more specifically cover the task. Planning-only requests use planning skills, not execution skills.
 For "dialogue" select the review skill(s); ${DEFAULT_REVIEW_SKILL} is the general default. Prefer a single-purpose skill for a bounded task, but choose the relevant pipeline or internal loop when the user requests autonomous multi-stage or overnight iterative work; do not reject it merely because it loops. Do not invent an external timer, duplicate a skill's scheduler, or turn review verdicts into cron polling. Use user-specified duration, round, cost and resource limits and the chosen skill's stopping rules; "overnight" is not infinite work or permission to rent new compute. The user's request to execute or work unattended authorizes that scoped workflow, not unrelated deployment, installation, spending or source changes. Existing project permissions still apply.
 Distinguish intent from mention: explaining experiments, quoting an overnight command, negating execution ("실행하지 말고 계획만"), editing a file named experiment.py, or changing this routing policy does not itself request experiment execution. Ordinary software edits, harness configuration and localized debugging remain solo unless an ARIS workflow is actually requested. Use recent context to resolve short follow-ups. Do not solve the task.
-Design the execution Waves as well as the route. A Wave is an execution stage, NOT nested-agent depth: the main agent launches all tasks directly; independent tasks within a Wave may run in parallel, and every task/result from the preceding Wave must complete successfully before the next starts. No recursive delegation or settings changes are needed. Wave 0 is you, Wave 1 is the main coordinator; your array defines Wave 2 onward.
-Return waves: [] when direct main-session work is enough (including explanation, planning-only work, or this routing-policy edit). Do not force delegation for ordinary work. Explicit subagent/flow tests and genuinely useful bounded delegation may still use the solo route: Astra remains the main coordinator, without ARIS skills. For review workflows include a review Wave; for execution then review use separate stages. Keep iterative review/experiment loops inside one appropriate Wave with the user's stopping conditions, rather than inventing a fixed number of loop rounds. Only include stages that require actual delegated work; analysis and final synthesis by the main agent do not need extra Waves.
-Choose 0–${MAX_WAVES} ordered stages, each with a unique CamelCase id (1–16 ASCII alphanumeric characters, starting uppercase), a short title, a concrete bounded goal, and parallel: 1–4. Choose the smallest useful stage count and parallelism for the request; do not always return the same topology. Goals are high-level work packets, not invented file names, results or approvals. The executor will ground them before dispatch. Every planned stage must actually run; do not add optional or decorative stages.
+Design the stage dependency graph as well as the route. Each waves entry is a bounded delegated stage with explicit dependsOn stage IDs; [] means independent of other stages. Determine dependencies from input/output artifacts, shared writes/resources and review targets, not model order. Never review an artifact concurrently with a stage changing it. Unknown dependencies must not be presented as proven independence. The runtime groups equal dependency depths into the same execution Wave (roots=Wave 2); Wave 0 is you, Wave 1 is the main coordinator. Ready independent stages and their models must be dispatched together in one native task batch, not serialized merely because their stage IDs or models differ. A dependent stage waits only for its declared prerequisites' successful full public results. No recursive delegation or settings changes are needed.
+Return waves: [] when direct main-session work is enough (including explanation, planning-only work, or this routing-policy edit). Do not force delegation for ordinary work. Explicit subagent/flow tests and genuinely useful bounded delegation may still use the solo route: Astra remains the main coordinator, without ARIS skills. For review workflows include a review stage; if it reviews newly produced artifacts, make it depend on their producer stages. Independent review of unchanged inputs may share a Wave with unrelated execution. Keep iterative review/experiment loops inside one stage with the user's stopping conditions. Only include stages that require actual delegated work; main-session analysis and synthesis need no extra stages.
+Choose 0–${MAX_WAVES} stages, each with a unique CamelCase id (1–16 ASCII alphanumeric characters, starting uppercase), short title, bounded goal, parallel: 1–4, and required dependsOn: [] or a list of existing stage IDs. Never include self, duplicate or cyclic dependencies. Do not supply computed Wave numbers. Keep the graph and concurrency minimal and justified; the run-wide live-task cap is four, even across different Waves. Goals are high-level packets, not invented file names, results or approvals; the executor grounds them before dispatch. Every planned stage must actually run, with no optional/decorative stages.
 Installed ARIS skills (name: description):
 ${listing}
-Return ONLY a JSON object, no markdown or prose. For solo: {"route":"solo","reason":"one short public justification in the user's language","waves":[]}. For dialogue or research: {"route":"dialogue" or "research","skills":["exact installed skill name"],"reason":"one short public justification in the user's language","waves":[{"id":"Review","title":"Independent review","goal":"Review the requested evidence within the user's scope","parallel":1}]}. Never include skills on solo. The waves array is required on every route.`,
+Return ONLY a JSON object, no markdown or prose. For solo: {"route":"solo","reason":"one short public justification in the user's language","waves":[]}. For dialogue or research: {"route":"dialogue" or "research","skills":["exact installed skill name"],"reason":"one short public justification in the user's language","waves":[{"id":"Review","title":"Independent review","goal":"Review the requested existing evidence within the user's scope","parallel":1,"dependsOn":[]}]}. Example dependency topology: InspectCode dependsOn [], InspectData dependsOn [], Review dependsOn ["InspectCode","InspectData"]; both inspections share Wave 2 and start together, Review is Wave 3 and waits for both. Use that topology only when the request warrants it. Never include skills on solo. The waves array is required on every route.`,
 		messages: requestMessages({ prompt, images, context, cwd }),
 	});
 	throwIfAborted(signal);

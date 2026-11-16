@@ -1,4 +1,4 @@
-// Data-only Terra execution Waves. Historical snapshots retain their observed delegation-depth layout.
+// Data-only dependency Waves. Historical snapshots retain their recorded sequential/delegation layout.
 // No model calls, timers or terminal controls from snapshot text enter this component.
 import { theme as liveTheme, matchesKey, truncateToWidth, wrapTextWithAnsi } from "@oh-my-pi/pi-tui";
 
@@ -39,12 +39,13 @@ function name(node) {
     clean(row.label) || clean(row.id) || "이름 미상";
 }
 
-// Only parentId and the documented legacy router -> final -> native relationship create edges.
-// Broken/missing parents remain inspectable roots; cyclic links are not drawn as delegation.
+// parentId records delegation; stage dependsOn records execution prerequisites.
+// Historical snapshots without dependencies retain their recorded sequential interpretation.
 function graph(snapshot) {
   const rows = Array.isArray(snapshot?.rows) ? snapshot.rows : [];
   const nodes = rows.filter(row => row && typeof row.id === "string")
     .map(row => ({ id: row.id, row, virtual: false, parent: undefined, depth: undefined }));
+  if (!nodes.length && snapshot?.status === "unobserved") return { nodes, waves: [], byId: new Map() };
   function virtual(id, row) {
     const node = { id, row: { id, jobIds: [], jobs: [], ...row }, virtual: true, parent: undefined, depth: undefined };
     nodes.push(node);
@@ -57,8 +58,8 @@ function graph(snapshot) {
     label: "실행 에이전트", parentId: "router", state: snapshot?.status === "running" ? "planned" : "unobserved",
   });
   for (const [index, wave] of (snapshot?.waves ?? []).entries()) {
-    if (!rows.some(row => row.wave === index + 2)) virtual(`virtual:wave:${wave.id}`, {
-      label: `${wave.id} · ${wave.title}`, wave: index + 2, task: wave.goal, parentId: null,
+    if (!rows.some(row => row.waveId === wave.id || (!row.waveId && row.wave === (wave.wave ?? index + 2)))) virtual(`virtual:wave:${wave.id}`, {
+      label: `${wave.id} · ${wave.title}`, wave: wave.wave ?? index + 2, waveId: wave.id, task: wave.goal, parentId: null,
       state: snapshot.status === "running" ? "planned" : "unobserved",
     });
   }
@@ -98,8 +99,12 @@ function graph(snapshot) {
   });
   const waves = [];
   for (const node of nodes) (waves[node.wave] ??= []).push(node);
-  for (const node of nodes) node.predecessors = snapshot?.waves && node.wave >= 2
-    ? waves[node.wave - 1] ?? [] : node.parent ? [node.parent] : [];
+  for (const node of nodes) {
+    const stage = snapshot?.waves?.find(stage => stage.id === node.row.waveId);
+    node.predecessors = Array.isArray(stage?.dependsOn)
+      ? stage.dependsOn.length ? nodes.filter(candidate => stage.dependsOn.includes(candidate.row.waveId)) : [byId.get("final")]
+      : snapshot?.waves && node.wave >= 2 ? waves[node.wave - 1] ?? [] : node.parent ? [node.parent] : [];
+  }
   return { nodes: waves.flat(), waves, byId };
 }
 function counts(nodes) {
@@ -157,13 +162,13 @@ function wrap(value, width) {
 /**
  * @param {() => object | undefined} getSnapshot
  * @param {import("@oh-my-pi/pi-tui").Theme | undefined} theme
- * @param {{interactive?: boolean, getHeight?: () => number,
+ * @param {{interactive?: boolean, embedded?: boolean, initialDetails?: boolean, getHeight?: () => number,
  * requestRender?: () => void, onClose?: () => void, readOutput?: (row: object) => Promise<string>}} options
  */
 export function createFlowView(getSnapshot, theme, options = {}) {
   const interactive = options.interactive === true;
   let selectedId;
-  let details = false;
+  let details = options.initialDetails === true;
   let scroll = 0;
   let detailLength = 0;
   let pageSize = 1;
@@ -182,10 +187,13 @@ export function createFlowView(getSnapshot, theme, options = {}) {
     const snapshot = typeof getSnapshot === "function" ? getSnapshot() : undefined;
     const data = graph(snapshot);
     if (!data.byId.has(selectedId)) {
-      selectedId = data.nodes.find(node => node.row.state === "failed")?.id ||
+      const nextId = data.nodes.find(node => node.row.state === "failed")?.id ||
         data.nodes.find(node => node.row.state === "running")?.id || data.nodes[0]?.id;
-      scroll = 0;
-      loaded = undefined;
+      if (nextId !== selectedId) {
+        selectedId = nextId;
+        scroll = 0;
+        loaded = undefined;
+      }
     }
     return { snapshot, ...data, selected: data.byId.get(selectedId) };
   }
@@ -223,7 +231,8 @@ export function createFlowView(getSnapshot, theme, options = {}) {
   }
   function bodyLines(data, width) {
     const { snapshot, selected: node } = data;
-    if (!node) return ["관측된 노드 없음"];
+    if (!node) return ["관측된 노드 없음", "", ...wrap(snapshot?.note, width),
+      ...(snapshot?.request ? ["", "[원본 사용자 요청]", ...wrap(snapshot.request, width)] : [])];
     const row = node.row;
     const lines = [];
     const section = (title, value) => {
@@ -232,8 +241,10 @@ export function createFlowView(getSnapshot, theme, options = {}) {
       lines.push(`[${title}]`, ...wrap(value, width));
     };
     section("노드", `${name(node)}\nID: ${clean(node.id)}\nWave ${node.wave} · ${snapshot?.waves ? "Terra 실행 단계" : "위임 깊이"}${!node.virtual ? `\n실제 위임 깊이: ${node.depth}` : ""}\n상태: ${state(node)[2]} (${clean(row.state)})${node.virtual ? "\n예정 경로: 호출/완료 근거가 아닙니다." : ""}`);
-    const planned = snapshot?.waves?.[node.wave - 2];
-    if (planned) section("Terra Wave 계획", `${planned.id} · ${planned.title}\n${planned.goal}\n동시 최대 ${planned.parallel}개${node.wave > 2 ? ` · Wave ${node.wave - 1}의 성공·공개 결과 수신 후 시작` : ""}`);
+    const planned = snapshot?.waves?.find(stage => stage.id === row.waveId);
+    if (planned) section("Terra Wave 계획", `${planned.id} · ${planned.title}\n${planned.goal}\n단계 동시 최대 ${planned.parallel}개${Array.isArray(planned.dependsOn)
+      ? ` · 실행 전체 최대 4개\n선행 단계: ${planned.dependsOn.join(", ") || "없음 (독립 실행)"}${planned.dependsOn.length ? "\n각 선행 단계의 성공·공개 결과 전문 수신 후 시작" : ""}`
+      : node.wave > 2 ? ` · Wave ${node.wave - 1}의 성공·공개 결과 수신 후 시작` : ""}`);
     section("에이전트 / 모델", [clean(row.agent), clean(row.role), clean(row.model) || "정확한 모델 미관측"].filter(Boolean).join("\n"));
     section("실제 위임 관계", node.virtual ? "호출 전: 실제 부모 관계 미관측" : node.parent ? `${name(node.parent)} (${clean(node.parent.id)}) → ${name(node)} (${clean(node.id)})` : node.relationNote ||
       (node.parentId ? `부모 ${clean(node.parentId)} 미관측 · 관계를 그리지 않음` : "루트 · 관측된 부모 없음"));
@@ -256,7 +267,7 @@ export function createFlowView(getSnapshot, theme, options = {}) {
   }
 
   function renderDetails(data, width, height, uiTheme) {
-    const title = uiTheme.fg("accent", `‹ Wave ${data.selected?.wave ?? 0} · ${data.selected ? name(data.selected) : "상세"}`);
+    const title = uiTheme.fg("accent", data.selected ? `‹ Wave ${data.selected.wave ?? 0} · ${name(data.selected)}` : "‹ 세션 기록 · Flow 미관측");
     const body = bodyLines(data, width);
     pageSize = Math.max(1, height - 2);
     detailLength = body.length;
@@ -277,11 +288,14 @@ export function createFlowView(getSnapshot, theme, options = {}) {
     const header = width < 48
       ? `Flow ${n.done}/${n.total} ▶${n.live} !${n.failed} · ${status}`
       : `Agent Flow · ${status} · ${n.done}/${n.total} 완료${n.live ? ` · ${n.live} 실행` : ""}${n.failed ? ` · ${n.failed} 실패` : ""}`;
-    const meaning = snapshot?.waves
-      ? width < 48 ? "Wave=Terra 실행 단계 · ○예정" : "Wave = Terra 실행 단계 · W2+ 순차 · 연결=진행 순서 · 실제 부모는 상세"
+    const dependencies = snapshot?.waves?.some(stage => Array.isArray(stage.dependsOn));
+    const meaning = snapshot?.waves?.length === 0 ? "Wave 0=Terra · Wave 1=메인 · 위임 없음"
+      : dependencies
+      ? width < 48 ? "Wave=의존 깊이 · 같은 Wave 병렬" : "Wave = 의존 깊이 · 독립 작업 병렬 · 연결=조정/종속성 (전체는 상세)"
+      : snapshot?.waves ? width < 48 ? "Wave=기록된 실행 단계 · ○예정" : "Wave = 기록된 순차 실행 단계 · 연결=진행 순서"
       : width < 48 ? "Wave=위임 깊이 · ○가상" : "Wave = 위임 깊이 (이전 기록) · 연결=parentId · ○ 가상은 완료 집계 제외";
-    const headerSize = height >= 7 ? 2 : height >= 4 ? 1 : 0;
-    const footerSize = height >= 4 ? 2 : height >= 2 ? 1 : 0;
+    const headerSize = options.embedded ? 0 : height >= 7 ? 2 : height >= 4 ? 1 : 0;
+    const footerSize = options.embedded ? (height >= 2 ? 1 : 0) : height >= 4 ? 2 : height >= 2 ? 1 : 0;
     const boardHeight = height - headerSize - footerSize;
     const out = [];
     if (headerSize) out.push(fit(uiTheme.bold(uiTheme.fg("accent", header)), width));
@@ -291,7 +305,7 @@ export function createFlowView(getSnapshot, theme, options = {}) {
 
     // Narrow and very short displays use one stable, all-node list, not one focus per wave.
     // The widget starts at the first node; only explicit inspector navigation moves a viewport.
-    boardMode = width < 64 || boardHeight < 2 ? "list" : "waves";
+    boardMode = width < (options.embedded ? 40 : 64) || boardHeight < 2 ? "list" : "waves";
     if (boardMode === "list") {
       boardPageSize = boardHeight;
       const index = data.nodes.findIndex(node => node.id === selectedId);
@@ -309,7 +323,7 @@ export function createFlowView(getSnapshot, theme, options = {}) {
       }
     } else {
       const gap = 4;
-      const capacity = Math.max(1, Math.floor((width + gap) / 22));
+      const capacity = Math.max(1, Math.floor((width + gap) / (options.embedded ? 18 : 22)));
       const columnCount = Math.min(waves.length, capacity);
       if (interactive && selected) {
         if (selected.wave < columnStart) columnStart = selected.wave;
@@ -379,11 +393,13 @@ export function createFlowView(getSnapshot, theme, options = {}) {
     const position = `${viewport}${hidden ? ` · 숨김 ${hidden}` : ""}${interactive && selected ? ` · › ${name(selected)}${selected.parent ? ` ← ${name(selected.parent)}` : ""}` : ""}`;
     const footer = interactive
       ? width < 32 ? "↑↓ Tab PgUp/Dn Enter q/Esc" : width < 64 ? "↑↓/Tab PgUp/Dn Home/End · Enter 상세 · q/Esc" : "↑↓ 같은 Wave · ←→ Wave · Tab/PgUp/PgDn · Home/End · Enter 상세 · Esc/q (실행 유지)"
-      : "/dialogue flow · 모든 노드/전체 출력";
+      : "/strataa flow · 모든 노드/전체 출력";
     if (footerSize > 1) out.push(fit(uiTheme.fg("muted", position), width));
-    if (footerSize) out.push(fit(uiTheme.fg("dim", footerSize === 1
-      ? `${interactive ? viewport : "/dialogue flow"}${hidden ? ` +${hidden}` : ""}${interactive ? " · PgUp/Dn Enter q/Esc" : ""}`
-      : footer), width));
+    if (footerSize) out.push(fit(uiTheme.fg("dim", options.embedded
+      ? `${viewport}${hidden ? ` · 숨김 ${hidden} · Enter 전체` : ""} · ${snapshot?.waves ? "실행 단계" : "위임 깊이"}`
+      : footerSize === 1
+        ? `${interactive ? viewport : "/strataa flow"}${hidden ? ` +${hidden}` : ""}${interactive ? " · PgUp/Dn Enter q/Esc" : ""}`
+        : footer), width));
     return out.slice(0, height);
   }
 
@@ -394,7 +410,7 @@ export function createFlowView(getSnapshot, theme, options = {}) {
       const data = current();
       if (!data.snapshot && !interactive) return [];
       const available = Math.max(1, Math.floor(options.getHeight?.() ?? process.stdout.rows ?? 24) || 1);
-      const height = interactive ? available : Math.min(18, Math.max(1, Math.floor(available * 0.65)));
+      const height = interactive || options.embedded ? available : Math.min(18, Math.max(1, Math.floor(available * 0.65)));
       return details ? renderDetails(data, width, height, theme ?? liveTheme) : renderBoard(data, width, height, theme ?? liveTheme);
     },
     invalidate() {}, // Every render reads the live snapshot, including in-place updates.

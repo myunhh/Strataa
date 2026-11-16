@@ -9,11 +9,12 @@ const STATE = "agent-dialogue-state";
 const CARD = "agent-dialogue";
 const AGENTS_DIR = fileURLToPath(new URL("./agents/", import.meta.url));
 const HELP = [
-  "/dialogue on · off · status · stop",
-  "/dialogue skills — 설치된 ARIS 스킬 목록과 실행 준비 상태",
-  "/dialogue flow — Wave 카드 그래프 · 노드 선택 · 공개 작업/결과 상세",
-  "/dialogue models — Fable Brain · Opus Worker · Astra 검토자 모델 선택",
-  "/dialogue fable|opus|astra [provider/model] — 생략하면 선택창",
+  "/strataa on · off · status · stop",
+  "/strataa skills — 설치된 ARIS 스킬 목록과 실행 준비 상태",
+  "/strataa flow — Wave 카드 그래프 · 노드 선택 · 공개 작업/결과 상세",
+  "/strataa watch — 연결된 모든 OMP 세션의 공개 Flow 모니터",
+  "/strataa models — Fable Brain · Opus Worker · Astra 검토자 모델 선택",
+  "/strataa fable|opus|astra [provider/model] — 생략하면 선택창",
   "ON = AUTO: Terra 6.1 xhigh가 Astra 단독 / ARIS 검토 / ARIS 연구 스킬을 선택합니다.",
   `ARIS 경로: Fable이 분석·아이디어·종합을 맡고, native ${WORKER_AGENT}(Opus)가 실행, ${REVIEWER_AGENT}(Astra)가 독립 검토합니다.`,
   "라우팅에는 최근 텍스트(최대 24,000자)와 요청/이미지를 전송하며 추가 사용량이 발생합니다.",
@@ -39,7 +40,7 @@ function restoredState(entries) {
 function assertModel(ctx, selector, role) {
   const model = ctx.models.list().find(item => `${item.provider}/${item.id}` === selector);
   const label = ROLES[role].label;
-  if (!model) throw new Error(`${label} 모델을 사용할 수 없습니다: ${selector}. /login 또는 /dialogue models를 확인하세요.`);
+  if (!model) throw new Error(`${label} 모델을 사용할 수 없습니다: ${selector}. /login 또는 /strataa models를 확인하세요.`);
   if (!matchesRole(role, model, ctx.models.family(model))) {
     throw new Error(`${label} 역할에 맞는 모델이 필요합니다: ${selector}`);
   }
@@ -86,10 +87,11 @@ const observedRuns = new Set();
  * `skills` is the installed-bundle accessor ({ getArisCatalog, loadArisSkills, validateArisInstall }).
  * `readAgentOutput(id, ctx)` resolves a published `agent://<id>` document through the host; a host
  * without one fails every detached round instead of guessing at files.
+ * `monitor` optionally supplies a publisher, watch component factory and original-prompt summarizer.
  */
-export function registerDialogue(pi, runModelTurn, createFlowView, skills, readAgentOutput = async id => {
+export function registerStrataa(pi, runModelTurn, createFlowView, skills, readAgentOutput = async id => {
   throw new Error(`agent://${id} 공개 출력을 읽을 수단이 호스트에 없음`);
-}) {
+}, monitor = {}) {
   const { getArisCatalog, loadArisSkills, validateArisInstall } = {
     getArisCatalog: () => skills.getArisCatalog(),
     loadArisSkills: names => skills.loadArisSkills(names),
@@ -102,6 +104,10 @@ export function registerDialogue(pi, runModelTurn, createFlowView, skills, readA
   let execution;
   let displayedRun;
   let explorer;
+  let watcher;
+  let monitorErrorReported = false;
+  let monitorStopped = false;
+  let flowGeneration = 0;
   let observedContext;
   let observationOwner;
   let observationIdentity;
@@ -114,7 +120,7 @@ export function registerDialogue(pi, runModelTurn, createFlowView, skills, readA
   const card = (content, details = {}) => pi.sendMessage({
     customType: CARD, content, display: true, details,
   }, { triggerTurn: false });
-  const status = ctx => ctx.ui.setStatus(CARD, state.enabled ? "Dialogue AUTO · Terra → Astra / Fable Brain · Opus Worker · Astra 검토" : undefined);
+  const status = ctx => ctx.ui.setStatus(CARD, state.enabled ? "Strataa AUTO · Terra → Astra / Fable Brain · Opus Worker · Astra 검토" : undefined);
   const persist = ctx => {
     revision++;
     pi.appendEntry(STATE, { version: 4, ...state });
@@ -123,9 +129,53 @@ export function registerDialogue(pi, runModelTurn, createFlowView, skills, readA
   const owns = run => active === run && !run.controller.signal.aborted &&
     run.ctx.sessionManager.getSessionId() === run.sessionId;
 
+  function monitorFailure(ctx, error) {
+    if (monitorErrorReported) return;
+    monitorErrorReported = true;
+    ctx.ui.notify(`Strataa Flow 모니터 오류: ${publicText(error instanceof Error ? error.message : String(error))}`, "error");
+  }
+
+  function publish(ctx, flow, run) {
+    if (!isMain(ctx) || monitorStopped || !monitor.publisher) return;
+    try {
+      monitor.publisher.publish({
+        sessionId: run?.sessionId ?? ctx.sessionManager.getSessionId(),
+        sessionFile: run ? run.sessionFile : ctx.sessionManager.getSessionFile?.(),
+        cwd: ctx.cwd, flow,
+      });
+    } catch (error) { monitorFailure(ctx, error); }
+  }
+  function abortSummary(reason) {
+    if (displayedRun?.flow.promptSummary?.status === "running") {
+      displayedRun.controller?.abort(new Error(reason));
+    }
+  }
+
+
+  async function summarizePrompt(run) {
+    const current = () => !monitorStopped && run.flowGeneration === flowGeneration && displayedRun === run &&
+      run.ctx.sessionManager.getSessionId() === run.sessionId;
+    try {
+      const summary = await monitor.summarizePrompt(run.ctx, {
+        text: run.text, imageCount: run.images.length, signal: run.controller.signal,
+      });
+      if (!current()) return;
+      if (run.controller.signal.aborted) throw run.controller.signal.reason;
+      run.flow.promptSummary = { status: "completed", model: summary.model, text: publicText(summary.text) };
+    } catch (error) {
+      if (!current()) return;
+      run.flow.promptSummary = { status: "failed", model: monitor.summaryModel,
+        error: publicText(error instanceof Error ? error.message : String(error)) };
+    }
+    paint(run, true);
+  }
+
   function paint(run, save = false) {
+    // Navigation may already have rebound the host context to another session.
+    if (run.sessionId !== run.ctx.sessionManager.getSessionId()) return;
     displayedRun = run;
     if (save) pi.appendEntry(FLOW, structuredClone(run.flow));
+    publish(run.ctx, run.flow, run);
     if (run.ctx.mode === "tui") {
       if (run.view) {
         run.view.invalidate();
@@ -178,10 +228,49 @@ export function registerDialogue(pi, runModelTurn, createFlowView, skills, readA
     explorer?.close?.();
   }
 
+  function closeWatcher() {
+    watcher?.close?.();
+  }
+
+  async function showWatch(ctx) {
+    if (!monitor.createWatch) {
+      ctx.ui.notify("이 호스트에는 Strataa Flow 모니터가 연결되지 않았습니다.", "error");
+      return;
+    }
+    if (ctx.mode !== "tui") {
+      ctx.ui.notify("/strataa watch는 TUI 터미널에서 사용할 수 있습니다.", "info");
+      return;
+    }
+    if (watcher) return;
+    const panel = {};
+    const dispose = () => {
+      if (panel.disposed) return;
+      panel.disposed = true;
+      panel.view?.dispose?.();
+    };
+    watcher = panel;
+    try {
+      await ctx.ui.custom((tui, theme, _keys, done) => {
+        panel.close = () => { dispose(); done(undefined); };
+        panel.view = monitor.createWatch(theme, {
+          getHeight: () => tui.terminal.rows,
+          requestRender: () => tui.requestRender(),
+          onClose: panel.close,
+        });
+        return panel.view;
+      }, { overlay: true, overlayOptions: { width: "100%", maxHeight: "100%", margin: 0, fullscreen: true, mouseTracking: false } });
+    } catch (error) {
+      monitorFailure(ctx, error);
+    } finally {
+      dispose();
+      if (watcher === panel) watcher = undefined;
+    }
+  }
+
   async function showFlow(ctx) {
     const run = displayedRun;
     if (!run) {
-      ctx.ui.notify("아직 자동 라우팅 실행 기록이 없습니다. /dialogue on 후 요청하세요.", "info");
+      ctx.ui.notify("아직 자동 라우팅 실행 기록이 없습니다. /strataa on 후 요청하세요.", "info");
       return;
     }
     if (ctx.mode !== "tui") {
@@ -228,7 +317,7 @@ export function registerDialogue(pi, runModelTurn, createFlowView, skills, readA
   }
 
   async function pickModels(ctx, roles) {
-    if (!ctx.hasUI) throw new Error("모델 선택창에는 UI가 필요합니다. /dialogue <fable|opus|astra> <provider/model>을 사용하세요.");
+    if (!ctx.hasUI) throw new Error("모델 선택창에는 UI가 필요합니다. /strataa <fable|opus|astra> <provider/model>을 사용하세요.");
     const sessionId = ctx.sessionManager.getSessionId();
     const startedAtRevision = revision;
     const selected = {};
@@ -304,7 +393,7 @@ export function registerDialogue(pi, runModelTurn, createFlowView, skills, readA
       startExecution(run.flow);
       run.flow.note = "공개 실행 기록 · native 작업 카드는 실행 결과 원문 · Esc 중단";
       paint(run, true);
-      run.ctx.ui.setStatus(CARD, `Dialogue AUTO · ${ROLES[role].label} ${taskLabel}`);
+      run.ctx.ui.setStatus(CARD, `Strataa AUTO · ${ROLES[role].label} ${taskLabel}`);
       // Programmatic prompts bypass the external input hook: no routing recursion.
       pi.sendUserMessage([{ type: "text", text: run.text }, ...run.images]);
       active = undefined;
@@ -320,7 +409,7 @@ export function registerDialogue(pi, runModelTurn, createFlowView, skills, readA
     };
     try {
       if (!owns(run)) return;
-      run.ctx.ui.setStatus(CARD, "Dialogue AUTO · Terra 6.1 xhigh 라우팅");
+      run.ctx.ui.setStatus(CARD, "Strataa AUTO · Terra 6.1 xhigh 라우팅");
       paint(run, true);
       const decision = await routeRequest({ ...args, catalog: getArisCatalog() });
       if (!owns(run)) return;
@@ -331,7 +420,7 @@ export function registerDialogue(pi, runModelTurn, createFlowView, skills, readA
       }
       planFlow(run.flow, decision, run.config, { reviewRequired: run.aris?.reviewRequired });
       paint(run, true);
-      card(`**Terra 라우팅 → ${routeTitle(decision)}**\n\n${decision.reason}\n\n${decision.waves.length ? decision.waves.map((wave, index) => `Wave ${index + 2} · ${wave.title} · 동시 최대 ${wave.parallel}`).join("\n") : "위임 Wave 없음 · 메인 직접 처리"}`, {
+      card(`**Terra 라우팅 → ${routeTitle(decision)}**\n\n${decision.reason}\n\n${decision.waves.length ? decision.waves.map(stage => `Wave ${stage.wave} · ${stage.title} · 선행 ${stage.dependsOn.join(", ") || "없음"} · 동시 최대 ${stage.parallel}`).join("\n") : "위임 Wave 없음 · 메인 직접 처리"}`, {
         runId: run.id, phase: "route", ...decision, model: ROUTER.model, reasoning: ROUTER.reasoning,
       });
       if (owns(run)) await dispatch(run, decision);
@@ -346,8 +435,11 @@ export function registerDialogue(pi, runModelTurn, createFlowView, skills, readA
   }
 
   function restore(_event, ctx) {
+    flowGeneration++;
+    abortSummary("세션 이동으로 요청 요약을 중단했습니다.");
     observedContext = ctx;
     closeExplorer();
+    closeWatcher();
     cancel("세션이 변경되었습니다.", false);
     interruptExecution("세션이 변경되어 이전 실행의 추적을 종료했습니다.");
     unsubscribe?.();
@@ -357,12 +449,17 @@ export function registerDialogue(pi, runModelTurn, createFlowView, skills, readA
     state = restoredState(ctx.sessionManager.getBranch());
     status(ctx);
     const flow = restoreFlow(ctx.sessionManager.getBranch());
+    if (flow?.promptSummary?.status === "running") {
+      flow.promptSummary = { status: "failed", model: flow.promptSummary.model,
+        error: "이전 실행의 요청 요약이 완료되지 않았습니다. 세션 복원은 요약을 다시 호출하지 않습니다." };
+    }
     displayedRun = undefined;
     ctx.ui.setWidget(FLOW, undefined);
-    if (flow) paint({ flow, ctx });
+    if (flow) paint({ flow, ctx, sessionId: ctx.sessionManager.getSessionId(), sessionFile: ctx.sessionManager.getSessionFile?.() });
+    else publish(ctx, null);
     if (ctx.mode === "tui") {
       unsubscribe = ctx.ui.onTerminalInput(data => {
-        if (active && !explorer && ["\x1b", "\x03", "\x1b[27u", "\x1b[27;1u"].includes(data)) {
+        if (active && !explorer && !watcher && ["\x1b", "\x03", "\x1b[27u", "\x1b[27;1u"].includes(data)) {
           cancel("사용자가 중단했습니다.");
           return { consume: true };
         }
@@ -376,7 +473,10 @@ export function registerDialogue(pi, runModelTurn, createFlowView, skills, readA
   pi.on("session_tree", restore);
   for (const name of ["session_before_switch", "session_before_branch", "session_before_tree"]) {
     pi.on(name, async () => {
+      flowGeneration++;
+      abortSummary("세션 이동으로 요청 요약을 중단했습니다.");
       closeExplorer();
+      closeWatcher();
       revision++;
       cancel("세션 이동으로 중단했습니다.");
       interruptExecution("세션 이동으로 추적 종료. 미완료 단계는 성공으로 표시하지 않습니다.");
@@ -390,17 +490,25 @@ export function registerDialogue(pi, runModelTurn, createFlowView, skills, readA
     // still belong to this session. Navigation/shutdown invalidate them separately.
     await handoffTail;
   });
-  pi.on("session_shutdown", async () => {
+  pi.on("session_shutdown", async (_event, ctx) => {
+    flowGeneration++;
+    if (isMain(ctx)) monitorStopped = true;
+    abortSummary("세션 종료로 요청 요약을 중단했습니다.");
     for (const dispose of observationSubscriptions.splice(0)) dispose();
     observedContext = undefined;
     observationOwner = undefined;
     observationIdentity = undefined;
     closeExplorer();
+    closeWatcher();
     revision++;
     cancel("세션을 종료했습니다.", false);
     interruptExecution("세션이 종료되었습니다. 실행 중이던 단계의 완료를 확인하지 못했습니다.");
     unsubscribe?.();
     await handoffTail;
+    if (isMain(ctx)) {
+      try { monitor.publisher?.close(); }
+      catch (error) { monitorFailure(ctx, error); }
+    }
   });
   pi.on("agent_end", (event, ctx) => {
     if (!isMain(ctx) || !execution || execution.sessionId !== ctx.sessionManager.getSessionId()) return;
@@ -519,14 +627,16 @@ export function registerDialogue(pi, runModelTurn, createFlowView, skills, readA
     if (!run || event.toolName !== "task") return;
     if (!isMain(ctx)) return { block: true, reason: "Terra 실행 Wave는 메인 세션이 직접 조정합니다. 자식은 재위임할 수 없습니다." };
     try {
-      const input = run.aris ? prepareArisCall(run.aris, event.input) : event.input;
-      const prepared = prepareWaveCall(run.flow, input);
-      run.flow.activeWave = prepared.index;
+      const prepared = prepareWaveCall(run.flow, event.input);
+      if (run.aris) prepared.input = prepareArisCall(run.aris, prepared.input, prepared.bindings);
       run.flow.nextWaveTask = prepared.nextName;
-      // Reserve the whole admitted batch before another tool_call can pass the capacity/barrier check.
-      for (const task of prepared.input.tasks ?? [prepared.input]) {
-        expectNative(run.flow, task.agent || "task", task.name, { ...task, context: prepared.input.context, parentId: "final" });
-      }
+      // Reserve every independent stage in the native batch before another call can consume capacity.
+      const tasks = prepared.input.tasks ?? [prepared.input];
+      tasks.forEach((task, index) => {
+        expectNative(run.flow, task.agent || "task", task.name, {
+          ...task, waveId: prepared.bindings[index].waveId, context: prepared.input.context, parentId: "final",
+        });
+      });
       run.paint(true);
       return { input: prepared.input };
     }
@@ -691,8 +801,9 @@ export function registerDialogue(pi, runModelTurn, createFlowView, skills, readA
       if (!job || ["pending", "running"].includes(job.state)) continue;
       run.reviewNotes.add(item.id);
       const problem = job.state === "completed" ? undefined : (row.summary || reviewProblem(run.flow, item));
-      if (!problem && recordReview(run.aris, item, row.model)) {
-        notes.push(`검토 라운드 ${run.aris.reviews.length} 인정 (job ${item.id}, 모델 ${row.model}). 검토자의 지적은 자동 승인이 아닙니다: 각 지적에 근거로 응답하고, 후속 라운드는 다시 agent "${REVIEWER_AGENT}" task로 호출하세요. 이전 라운드 원문은 확장이 자동으로 덧붙입니다.`);
+      if (!problem && recordReview(run.aris, item, row.model, row.waveId)) {
+        const round = run.aris.reviews.filter(review => review.waveId === row.waveId).length;
+        notes.push(`${row.waveId} 검토 라운드 ${round} 인정 (job ${item.id}, 모델 ${row.model}). 검토자의 지적은 자동 승인이 아닙니다: 각 지적에 근거로 응답하고, 후속 라운드는 같은 단계에서 다시 agent "${REVIEWER_AGENT}" task로 호출하세요. 그 단계의 이전 라운드 원문만 확장이 자동으로 덧붙입니다.`);
       } else {
         notes.push(`REVIEW_UNAVAILABLE (job ${item.id}): ${problem || "검토 결과를 인정할 수 없음"}. 이 라운드는 검토로 인정되지 않으며 자동 재시도하지 않습니다. 최종 답변에 검토 미완료를 명시하세요.`);
       }
@@ -734,6 +845,7 @@ export function registerDialogue(pi, runModelTurn, createFlowView, skills, readA
     cancel("새 요청으로 대체되었습니다.");
     closeExplorer();
     interruptExecution("새 요청으로 이전 실행 화면의 추적을 종료했습니다.");
+    abortSummary("새 요청으로 이전 요청 요약을 중단했습니다.");
     try {
       assertModel(ctx, ROUTER.model, "router");
       assertModel(ctx, state.astra, "astra");
@@ -746,15 +858,19 @@ export function registerDialogue(pi, runModelTurn, createFlowView, skills, readA
     const run = {
       id: randomUUID(), ctx, controller: new AbortController(),
       sessionId: ctx.sessionManager.getSessionId(),
+      flowGeneration,
+      sessionFile: ctx.sessionManager.getSessionFile?.(),
       text: event.text, images: [...(event.images ?? [])],
       context: collectContext(ctx.sessionManager.getBranch()),
       config: { ...state }, lastPaint: 0, toolCalls: new Map(), reviewNotes: new Set(), workerNotes: new Set(),
       agentParents: new Map(), publicOutputs: new Map(),
     };
     run.flow = createFlow(run.id, run.text);
+    if (monitor.summarizePrompt) run.flow.promptSummary = { status: "running", model: monitor.summaryModel };
     active = run;
     paint(run, true);
-    card(`**자동 라우팅 요청**\n\n${event.text}\n\nTerra 6.1 xhigh → Astra 단독 / ARIS 검토 / ARIS 연구 · /dialogue stop 또는 Esc로 중단`, { runId: run.id, phase: "request" });
+    card(`**자동 라우팅 요청**\n\n${event.text}\n\nTerra 6.1 xhigh → Astra 단독 / ARIS 검토 / ARIS 연구 · /strataa stop 또는 Esc로 중단`, { runId: run.id, phase: "request" });
+    if (monitor.summarizePrompt) void summarizePrompt(run);
     // Input hooks have a 30s host budget. Return immediately; manage lifetime
     // ourselves instead of allowing timeout to dispatch the task prematurely.
     ctx.setTimeout(() => perform(run), 0);
@@ -765,12 +881,12 @@ export function registerDialogue(pi, runModelTurn, createFlowView, skills, readA
     try { const install = validateArisInstall(); return `ARIS: ${install.count}개 스킬 · commit ${String(install.commit).slice(0, 12)} · ${install.root}`; }
     catch (error) { return `ARIS 설치 문제: ${error instanceof Error ? error.message : String(error)}`; }
   };
-  const describe = () => `**Dialogue ${state.enabled ? "AUTO (ON)" : "OFF"}**\n\nRouter: \`${ROUTER.model}\` · ${ROUTER.reasoning}\n${SELECTABLE_ROLES.map(role => `${ROLES[role].label} — ${ROLES[role].duty}: \`${state[role]}\` · ${ROLES[role].reasoning}`).join("\n")}\nWorker: \`${WORKER_AGENT}\` · 검토자: \`${REVIEWER_AGENT}\` · ${installSummary()} · /dialogue skills`;
+  const describe = () => `**Strataa ${state.enabled ? "AUTO (ON)" : "OFF"}**\n\nRouter: \`${ROUTER.model}\` · ${ROUTER.reasoning}\n${SELECTABLE_ROLES.map(role => `${ROLES[role].label} — ${ROLES[role].duty}: \`${state[role]}\` · ${ROLES[role].reasoning}`).join("\n")}\nWorker: \`${WORKER_AGENT}\` · 검토자: \`${REVIEWER_AGENT}\` · ${installSummary()} · /strataa skills`;
 
-  pi.registerCommand("dialogue", {
+  pi.registerCommand("strataa", {
     description: "Terra 라우팅: Astra 단독 / Fable Brain → Opus Worker + Astra 독립 검토",
     getArgumentCompletions(prefix) {
-      return ["models", "skills", "flow", "on", "off", "status", "stop", ...SELECTABLE_ROLES, "help"]
+      return ["models", "skills", "flow", "watch", "on", "off", "status", "stop", ...SELECTABLE_ROLES, "help"]
         .filter(value => value.startsWith(prefix)).map(value => ({ value, label: value }));
     },
     async handler(args, ctx) {
@@ -778,11 +894,11 @@ export function registerDialogue(pi, runModelTurn, createFlowView, skills, readA
       const [action = state.enabled ? "off" : "on", ...rest] = args.trim().split(/\s+/).filter(Boolean);
       if (action === "help") { card(HELP, { phase: "status" }); return; }
       if (action === "stop") {
-        cancel("/dialogue stop");
+        cancel("/strataa stop");
         await handoffTail;
         if (execution?.sessionId === ctx.sessionManager.getSessionId()) {
           const run = execution.run;
-          endFlow(run, "cancelled", "사용자가 /dialogue stop으로 중단했습니다.");
+          endFlow(run, "cancelled", "사용자가 /strataa stop으로 중단했습니다.");
           execution = undefined;
           if (!ctx.isIdle()) await ctx.abort();
         }
@@ -790,6 +906,10 @@ export function registerDialogue(pi, runModelTurn, createFlowView, skills, readA
       }
       if (action === "status") {
         card(`${describe()}\n\n${active ? "라우팅·검토 진행 중" : execution ? `${ROLES[execution.role].label} 응답 진행 중` : "대기 중"}\n\n${HELP}`, { phase: "status" });
+        return;
+      }
+      if (action === "watch") {
+        await showWatch(ctx);
         return;
       }
       if (action === "flow") {
@@ -810,7 +930,7 @@ export function registerDialogue(pi, runModelTurn, createFlowView, skills, readA
         return;
       }
       if (active && action !== "off") {
-        ctx.ui.notify("먼저 /dialogue stop으로 현재 라우팅·검토를 중단하세요.", "warning");
+        ctx.ui.notify("먼저 /strataa stop으로 현재 라우팅·검토를 중단하세요.", "warning");
         return;
       }
       try {
@@ -823,19 +943,19 @@ export function registerDialogue(pi, runModelTurn, createFlowView, skills, readA
           } else cancel("대화 모드를 껐습니다.");
           state.enabled = action === "on";
         } else if (action === "models") {
-          if (rest.length) throw new Error("/dialogue models");
+          if (rest.length) throw new Error("/strataa models");
           if (!await pickModels(ctx, SELECTABLE_ROLES)) return;
         } else if (SELECTABLE_ROLES.includes(action)) {
           if (rest.length === 0) {
             if (!await pickModels(ctx, [action])) return;
           } else {
-            if (rest.length !== 1) throw new Error(`/dialogue ${action} [provider/model]`);
+            if (rest.length !== 1) throw new Error(`/strataa ${action} [provider/model]`);
             assertModel(ctx, rest[0], action);
             state[action] = rest[0];
           }
         } else throw new Error(HELP);
         persist(ctx);
-        card(`${describe()}\n\n${state.enabled ? `Terra가 경로와 필요한 ARIS 스킬을 선택합니다. 일반 작업은 Astra 단독, 검토·연구 요청은 Fable Brain이 이끌며 Opus Worker가 실행하고 Astra가 독립 검토합니다. 실행·검토 단계에 추가 사용량이 발생합니다. /dialogue off로 해제합니다.` : "자동 라우팅을 끕니다. 현재 세션 모델은 유지하며 /model로 변경할 수 있습니다."}`, { phase: "status" });
+        card(`${describe()}\n\n${state.enabled ? `Terra가 경로와 필요한 ARIS 스킬을 선택합니다. 일반 작업은 Astra 단독, 검토·연구 요청은 Fable Brain이 이끌며 Opus Worker가 실행하고 Astra가 독립 검토합니다. 실행·검토 단계에 추가 사용량이 발생합니다. /strataa off로 해제합니다.` : "자동 라우팅을 끕니다. 현재 세션 모델은 유지하며 /model로 변경할 수 있습니다."}`, { phase: "status" });
       } catch (error) {
         ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
       }

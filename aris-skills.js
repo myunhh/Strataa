@@ -16,7 +16,7 @@ function readProvenance() {
   try {
     text = readFileSync(provenancePath, "utf8");
   } catch (error) {
-    throw new Error(`ARIS pack is not installed: ${provenancePath} is missing (${error.code}); reinstall omp-agent-dialogue`);
+    throw new Error(`ARIS pack is not installed: ${provenancePath} is missing (${error.code}); reinstall omp-agent-strataa`);
   }
   const provenance = JSON.parse(text);
   const { source, skills, files } = provenance;
@@ -66,7 +66,7 @@ export function validateArisInstall() {
     try {
       info = statSync(directory);
     } catch {
-      throw new Error(`ARIS pack is incomplete: directory ${directory} is missing; reinstall omp-agent-dialogue`);
+      throw new Error(`ARIS pack is incomplete: directory ${directory} is missing; reinstall omp-agent-strataa`);
     }
     if (!info.isDirectory()) throw new Error(`ARIS pack is incomplete: ${directory} is not a directory`);
   }
@@ -76,7 +76,7 @@ export function validateArisInstall() {
     try {
       info = statSync(file);
     } catch {
-      throw new Error(`ARIS pack is incomplete: ${entry.path} is missing from ${root}; reinstall omp-agent-dialogue`);
+      throw new Error(`ARIS pack is incomplete: ${entry.path} is missing from ${root}; reinstall omp-agent-strataa`);
     }
     if (!info.isFile()) throw new Error(`ARIS pack is incomplete: ${entry.path} is not a regular file`);
     if (info.size !== entry.size) throw new Error(`ARIS pack is incomplete: ${entry.path} has ${info.size} bytes, expected ${entry.size}`);
@@ -109,7 +109,7 @@ export function loadArisSkills(names) {
     try {
       content = readFileSync(file, "utf8");
     } catch (error) {
-      throw new Error(`ARIS skill ${name} is missing: ${file} (${error.code}); reinstall omp-agent-dialogue`);
+      throw new Error(`ARIS skill ${name} is missing: ${file} (${error.code}); reinstall omp-agent-strataa`);
     }
     parseFrontmatter(name, content);
     return { name, path: file, content };

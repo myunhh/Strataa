@@ -3,7 +3,7 @@ import { REVIEWER_AGENT, WORKER_AGENT, reviewOutput, reviewReference } from "./a
 import { unfinishedWaves } from "./waves.js";
 
 export const FLOW = "agent-dialogue-flow";
-const INITIAL_NOTE = "공개 실행 기록 · /dialogue flow 상세 · Esc 중단";
+const INITIAL_NOTE = "공개 실행 기록 · /strataa flow 상세 · Esc 중단";
 const terminal = state => ["completed", "failed", "cancelled", "skipped", "interrupted"].includes(state);
 /**
  * Row roles: router (Terra) · solo (Astra alone) · brain (Fable: analysis, planning, synthesis, final answer)
@@ -58,7 +58,6 @@ export function planFlow(flow, decision, config, options = {}) {
   flow.route = decision.route;
   flow.reason = decision.reason;
   flow.waves = structuredClone(decision.waves);
-  flow.activeWave = 0;
   flow.rows[0].wave = 0;
   updateStage(flow, "router", "completed", decision.reason);
   if (ARIS_ROUTES.includes(decision.route)) {
@@ -93,7 +92,7 @@ export function startExecution(flow) {
 /** Pre-register a named native job (e.g. an aris-worker/aris-reviewer task name) so later agent-less wait snapshots correlate. */
 export function expectNative(flow, agent, id, task = {}) {
   if (flow.status !== "running" || typeof id !== "string" || !id) return false;
-  const row = correlate(flow, { id, agent, parentId: task.parentId });
+  const row = correlate(flow, { id, agent, parentId: task.parentId, waveId: task.waveId });
   if (!row || row.jobIds.includes(id)) return false;
   const input = [publicText(task?.context), publicText(task?.task)].filter(text => text.trim()).join("\n\n");
   if (input) row.task = input;
@@ -193,14 +192,14 @@ function correlate(flow, item) {
   const parentId = item.parentId ?? "final";
   const final = flow.rows.findIndex(candidate => candidate.id === "final");
   const insert = row => {
-    const index = flow.activeWave ?? 0;
-    const wave = flow.waves?.[index];
-    if (wave) Object.assign(row, { wave: index + 2, waveId: wave.id });
+    const waveId = item.waveId ?? (item.id.includes("__") ? item.id.split("__", 1)[0] : undefined);
+    const stage = waveId ? flow.waves?.find(stage => stage.id === waveId) : flow.waves?.length === 1 ? flow.waves[0] : undefined;
+    if (stage) Object.assign(row, { wave: stage.wave, waveId: stage.id });
     flow.rows.splice(final < 0 ? flow.rows.length : final, 0, row);
     return row;
   };
   if (flow.reviewer && item.agent === flow.reviewer.agent) {
-    const row = makeRow(`review:${item.id}`, `${REVIEWER_AGENT} 검토 라운드 ${reviewRows(flow).length + 1}`, "Astra", flow.reviewer.model, "reviewer", parentId);
+    const row = makeRow(`review:${item.id}`, `${REVIEWER_AGENT} 검토 작업 ${reviewRows(flow).length + 1}`, "Astra", flow.reviewer.model, "reviewer", parentId);
     row.review = true;
     return insert(row);
   }
@@ -350,7 +349,7 @@ function endFlow(flow, status, note, at) {
   // Execution ending never implies reviewer acceptance; the note carries the observed evidence only.
   flow.note = publicSummary(note || (status === "completed"
     ? (flow.reviewer ? `실행 종료 · 검토자 라운드 ${reviewEvidence(flow).completed}회 완료 관측${flow.worker ? ` · 작업자 실행 ${workerEvidence(flow).completed}건` : ""}`
-      : "공개 결과 요약 · /dialogue flow 상세")
+      : "공개 결과 요약 · /strataa flow 상세")
     : status === "incomplete" ? "호출되지 않았거나 완료 신호가 없는 단계가 있습니다." : "실행 중단 · 완료된 단계만 보존"));
 }
 
@@ -370,6 +369,6 @@ export function restoreFlow(entries) {
 export function flowText(flow) {
   const labels = { pending: "분류 중", solo: "일반 작업", dialogue: "ARIS 검토", research: "ARIS 연구" };
   return [`Agent Flow · ${labels[flow.route]} · ${flow.status}`, flow.reason, flow.skills?.length ? `skills: ${flow.skills.join(", ")}` : "",
-    ...(flow.waves ?? []).map((wave, index) => `Wave ${index + 2} · ${wave.title} · ${wave.goal}`),
+    ...(flow.waves ?? []).map((stage, index) => `Wave ${stage.wave ?? index + 2} · ${stage.title} · ${stage.goal}${stage.dependsOn ? ` · 선행: ${stage.dependsOn.join(", ") || "없음"}` : ""}`),
     ...flow.rows.map(row => `${row.parentId ? "  └ " : ""}${Number.isInteger(row.wave) ? `W${row.wave} ` : ""}[${row.state}] ${row.label} — ${row.agent}${row.role ? ` (${row.role})` : ""} · ${row.model}${row.summary ? `\n  ${row.summary}` : ""}${row.jobIds.length ? ` · ${row.jobIds.join(", ")}` : ""}`), flow.note].filter(Boolean);
 }

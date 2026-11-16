@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 
 const source = path.dirname(fileURLToPath(import.meta.url));
 const manifest = JSON.parse(await readFile(path.join(source, "package.json"), "utf8"));
-if (manifest.name !== "omp-agent-dialogue" || !/^\d+\.\d+\.\d+$/.test(manifest.version)) {
+if (manifest.name !== "omp-agent-strataa" || !/^\d+\.\d+\.\d+$/.test(manifest.version)) {
   throw new Error("Unexpected extension package identity");
 }
 const omp = process.env.OMP_BIN || "omp";
@@ -16,7 +16,7 @@ const match = version.match(/(\d+)\.(\d+)\.(\d+)/);
 if (!match || Number(match[1]) < 18 || (Number(match[1]) === 18 && Number(match[2]) < 15)) {
   throw new Error(`OMP >=18.15.0 is required; found ${version}`);
 }
-const files = ["package.json", "index.js", "controller.js", "protocol.js", "waves.js", "transport.js", "flow.js", "flow-view.js", "aris-skills.js", "aris-runtime.js", "aris-provenance.json", "ARIS-LICENSE", "install.mjs", "README.md", "CHANGELOG.md"];
+const files = ["package.json", "index.js", "controller.js", "protocol.js", "waves.js", "transport.js", "prompt-summary.js", "flow.js", "flow-view.js", "flow-store.js", "flow-watch.js", "live-hosts.js", "saved-flow.js", "aris-skills.js", "aris-runtime.js", "aris-provenance.json", "ARIS-LICENSE", "install.mjs", "README.md", "CHANGELOG.md"];
 for (const directory of ["agents", "test"]) {
   for (const name of (await readdir(path.join(source, directory))).sort()) {
     if (name.endsWith(directory === "agents" ? ".md" : ".test.js")) files.push(`${directory}/${name}`);
@@ -32,7 +32,7 @@ async function walk(directory) {
     else throw new Error(`Refusing to ship non-regular file: ${relative}`);
   }
 }
-for (const directory of ["skills", "tools", "templates"]) await walk(directory);
+for (const directory of ["skills", "tools", "templates", "dashboard"]) await walk(directory);
 const provenance = JSON.parse(await readFile(path.join(source, "aris-provenance.json"), "utf8"));
 for (const entry of provenance.files) {
   if (!files.includes(entry.path)) throw new Error(`ARIS pack file listed in aris-provenance.json is missing from the checkout: ${entry.path}`);
@@ -45,7 +45,7 @@ files.forEach((file, i) => { hash.update(`${file}:${modes[i].toString(8)}`); has
 const fingerprint = hash.digest("hex").slice(0, 12);
 // Immutable, content-addressed installation. Removing the development worktree
 // or updating OMP cannot remove the running extension. No dependency installation.
-const destination = path.join(homedir(), ".local", "share", "omp-agent-dialogue", `${manifest.version}-${fingerprint}`);
+const destination = path.join(homedir(), ".local", "share", "omp-agent-strataa", `${manifest.version}-${fingerprint}`);
 const directories = new Set(files.map(file => path.dirname(file)).filter(directory => directory !== "."));
 for (const directory of directories) await mkdir(path.join(destination, directory), { recursive: true });
 for (let index = 0; index < files.length; index++) {
@@ -63,4 +63,4 @@ for (let index = 0; index < files.length; index++) {
 }
 console.log(`Shipped ${files.length} files including ${provenance.skills.length} ARIS skills from ${provenance.source.url}@${provenance.source.commit.slice(0, 12)}`);
 execFileSync(omp, ["plugin", "link", destination], { stdio: "inherit" });
-console.log(`Installed omp-agent-dialogue@${manifest.version} for ${version}\n${destination}\nIn OMP: /reload-plugins, /dialogue skills, then /dialogue on (Fable Brain + Opus Worker + Astra reviewer)`);
+console.log(`Installed omp-agent-strataa@${manifest.version} for ${version}\n${destination}\nIn OMP: /reload-plugins, /strataa skills, then /strataa on (Fable Brain + Opus Worker + Astra reviewer)\nIn another OMP terminal: /strataa watch (read-only multi-session flow monitor)`);
