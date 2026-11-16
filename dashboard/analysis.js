@@ -2,8 +2,8 @@ import { spawn } from "node:child_process";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { REASONING_LEVELS } from "../model-config.js";
 
-export const DEFAULT_MODEL = "openai-codex/gpt-6-astra";
 export const MAX_ANALYSIS_CHARS = 180000;
 const LEVELS = ["field", "problem", "method", "technique"];
 const SAFE_ID = /^[a-zA-Z0-9_-]{1,100}$/;
@@ -261,10 +261,10 @@ function finalResult(stdout, requestedModel) {
   return { value, model: `${finalMessage.provider}/${finalMessage.model}` };
 }
 
-async function runOmp(prompt, model, signal, configPath) {
+async function runOmp(prompt, model, reasoning, signal, configPath) {
   if (signal?.aborted) fail("analysis aborted before OMP launch");
   return new Promise((resolve, reject) => {
-    const args = ["--print", "--mode", "json", "--no-tools", "--no-extensions", "--no-skills", "--no-rules", "--no-context-files", "--no-session", "--no-title", "--no-lsp", "--no-prewalk", "--model", model, "--thinking", "high", "--max-time", "180", "--config", configPath];
+    const args = ["--print", "--mode", "json", "--no-tools", "--no-extensions", "--no-skills", "--no-rules", "--no-context-files", "--no-session", "--no-title", "--no-lsp", "--no-prewalk", "--model", model, "--thinking", reasoning, "--max-time", "180", "--config", configPath];
     const child = spawn(process.env.OMP_BIN || "omp", args, { shell: false, stdio: ["pipe", "pipe", "pipe"], detached: process.platform !== "win32" });
     let failure;
     let killTimer;
@@ -319,8 +319,9 @@ async function runOmp(prompt, model, signal, configPath) {
   });
 }
 
-export async function analyzePapers({ papers, concepts, model = DEFAULT_MODEL, signal }) {
+export async function analyzePapers({ papers, concepts, model, reasoning, signal }) {
   modelSelector(model);
+  if (!REASONING_LEVELS.includes(reasoning)) fail("reasoning must be auto, off, minimal, low, medium, high, xhigh or max");
   const prompt = buildAnalysisPrompt(papers, concepts);
   if (signal?.aborted) fail("analysis aborted before OMP launch");
   const directory = await mkdtemp(path.join(tmpdir(), "strataa-analysis-"));
@@ -328,8 +329,8 @@ export async function analyzePapers({ papers, concepts, model = DEFAULT_MODEL, s
     // Explicit per-run overlay only; never read or rewrite the operator's settings/auth.
     const configPath = path.join(directory, "inference.yml");
     await writeFile(configPath, "retry:\n  enabled: false\n  maxRetries: 0\n  modelFallback: false\n  usageAwareFallback: false\ncontextPromotion:\n  enabled: false\nadvisor:\n  enabled: false\ncompaction:\n  enabled: false\n  midTurnEnabled: false\nfeatures:\n  unexpectedStopDetection: none\n", { mode: 0o600 });
-    const result = await runOmp(prompt, model, signal, configPath);
-    return { ...validateAnalysis(result.value, papers, concepts), model: result.model };
+    const result = await runOmp(prompt, model, reasoning, signal, configPath);
+    return { ...validateAnalysis(result.value, papers, concepts), model: result.model, reasoning };
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

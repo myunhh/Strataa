@@ -1,4 +1,4 @@
-// Model transport for fixed Terra routing and Luna prompt summaries; execution uses native sessions.
+// Model transport for configured routing and prompt summaries; execution uses native sessions.
 //
 // Runs one consultant turn through the host's own `@oh-my-pi/pi-ai` streaming
 // entrypoint (the OMP extension loader rebinds that specifier to the running
@@ -7,7 +7,7 @@
 // hands streamSimple an ApiKeyResolver that mints/refreshes the key inside the
 // host's auth-retry policy.
 import { streamSimple } from "@oh-my-pi/pi-ai";
-import { matchesRole, ROLES } from "./protocol.js";
+import { MODEL_ROLES } from "./model-config.js";
 
 /** Per-turn wall-clock ceiling. Reasoning models stall rarely but expensively. */
 export const TURN_DEADLINE_MS = 120_000;
@@ -21,13 +21,11 @@ export const TURN_MAX_TOKENS = 2000;
 export const TURN_REASONING = "low";
 
 /**
- * Resolve the exact selector to an authenticated host model and enforce the
- * speaker's family. Never substitutes: a selector that does not resolve, or
- * resolves to a different provider/id than written, is an error.
+ * Resolve an exact selector from any provider/model in the host catalog.
+ * Never substitute an unavailable identity or infer a model from a role name.
  */
 export function resolveSpeakerModel(ctx, speaker, selector) {
-	const role = ROLES[speaker];
-	if (!role) throw new Error(`Unknown dialogue speaker "${speaker}"`);
+	if (!MODEL_ROLES.includes(speaker)) throw new Error(`Unknown Strataa role "${speaker}"`);
 	if (typeof selector !== "string" || selector.trim() === "") {
 		throw new Error(`No model configured for ${speaker}`);
 	}
@@ -36,21 +34,16 @@ export function resolveSpeakerModel(ctx, speaker, selector) {
 	if (!model) {
 		throw new Error(`Model "${spec}" for ${speaker} is not an authenticated model in this session (see /model)`);
 	}
-	// `resolve` accepts bare ids and aliases; the dialogue requires the exact
-	// provider/id so a different provider's same-named model is never picked up.
+	// Host resolution also accepts aliases; Strataa requires the exact provider/id.
 	const exact = `${model.provider}/${model.id}`;
-	if (spec.includes("/") && exact.toLowerCase() !== spec.toLowerCase()) {
+	if (exact !== spec || !spec.includes("/")) {
 		throw new Error(`Model "${spec}" for ${speaker} resolved to "${exact}"; configure the exact selector`);
-	}
-	const family = ctx.models.family(model);
-	if (!matchesRole(speaker, model, family)) {
-		throw new Error(`Model "${exact}" is not valid for ${role.label}: family "${family}", expected "${role.family}" and the named role's model lineage`);
 	}
 	return model;
 }
 
 /**
- * Run one dialogue turn. Resolves on `{text, usage, stopReason}` only when the
+ * Run one configured turn. Resolves on `{text, usage, stopReason}` only when the
  * provider finished with `stop` and produced visible text; every other outcome
  * (abort, deadline, provider error, truncation, tool-use attempt, empty text)
  * rejects so the protocol can never hand off a fabricated or partial result.
@@ -118,6 +111,7 @@ export async function runModelTurn(ctx, { speaker, model, reasoning, systemPromp
  * Other consultant calls retain the lowest supported effort.
  */
 export function turnEffort(model, requested) {
+	if (requested === "auto") return undefined;
 	const efforts = model.thinking?.efforts;
 	if (requested !== undefined) {
 		if (!model.reasoning || !Array.isArray(efforts) || !efforts.includes(requested)) {

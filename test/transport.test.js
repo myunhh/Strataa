@@ -77,31 +77,38 @@ const done = (content, stopReason = "stop", extra = {}) => ({
 	message: { role: "assistant", content, stopReason, usage: { input: 1, output: 2 }, ...extra },
 });
 
-test("speaker family is enforced from catalog identity, never provider substrings", () => {
-	const ctx = ctxWith([claude, gpt, model("openai-codex", "claude-ish", "openai")]);
-	assert.equal(resolveSpeakerModel(ctx, "opus", "anthropic/claude-opus-4-6"), claude);
-	assert.equal(resolveSpeakerModel(ctx, "astra", "openai-codex/gpt-6-astra"), gpt);
-	assert.throws(() => resolveSpeakerModel(ctx, "opus", "openai-codex/gpt-6-astra"), /family "openai", expected "anthropic"/);
-	assert.throws(() => resolveSpeakerModel(ctx, "astra", "anthropic/claude-opus-4-6"), /family "anthropic", expected "openai"/);
-	assert.throws(() => resolveSpeakerModel(ctx, "opus", "openai-codex/claude-ish"), /expected "anthropic"/);
+test("every configured role can use any exact catalog model without lineage filtering", () => {
+	const custom = model("custom-provider", "custom-model", "unknown", { reasoning: false });
+	const ctx = ctxWith([claude, gpt, custom]);
+	for (const role of ["router", "brain", "worker", "reviewer", "solo", "summary", "analysis"]) {
+		assert.equal(resolveSpeakerModel(ctx, role, "anthropic/claude-opus-4-6"), claude);
+		assert.equal(resolveSpeakerModel(ctx, role, "openai-codex/gpt-6-astra"), gpt);
+		assert.equal(resolveSpeakerModel(ctx, role, "custom-provider/custom-model"), custom);
+	}
 });
 
 test("unavailable or alias-resolved selectors reject instead of substituting", () => {
 	const alias = { ...claude, provider: "github-copilot" };
 	const ctx = ctxWith([alias]);
 	ctx.models.resolve = () => alias; // host alias/bare-id matching picks a different provider
-	assert.throws(() => resolveSpeakerModel(ctx, "opus", "anthropic/claude-opus-4-6"), /resolved to "github-copilot\/claude-opus-4-6"/);
-	assert.throws(() => resolveSpeakerModel(ctxWith([]), "astra", "openai-codex/gpt-6-astra"), /not an authenticated model/);
-	assert.throws(() => resolveSpeakerModel(ctxWith([gpt]), "astra", "   "), /No model configured/);
+	assert.throws(() => resolveSpeakerModel(ctx, "worker", "anthropic/claude-opus-4-6"), /resolved to "github-copilot\/claude-opus-4-6"/);
+	assert.throws(() => resolveSpeakerModel(ctxWith([]), "solo", "openai-codex/gpt-6-astra"), /not an authenticated model/);
+	assert.throws(() => resolveSpeakerModel(ctxWith([gpt]), "solo", "   "), /No model configured/);
 });
 
-test("named roles reject same-family models from the wrong lineage", () => {
-	const luna = model("openai-codex", "gpt-6-luna", "openai");
-	const terra = model("openai-codex", "gpt-6.1-terra", "openai");
-	const ctx = ctxWith([gpt, luna, terra, claude, model("anthropic", "claude-sonnet-4-6", "anthropic")]);
-	assert.throws(() => resolveSpeakerModel(ctx, "astra", "openai-codex/gpt-6-luna"));
-	assert.throws(() => resolveSpeakerModel(ctx, "opus", "anthropic/claude-sonnet-4-6"));
-	assert.throws(() => resolveSpeakerModel(ctx, "router", "openai-codex/gpt-6-astra"));
+test("auto supports a non-reasoning model without substituting its identity", async () => {
+	const custom = model("custom-provider", "custom-model", "unknown", { reasoning: false });
+	let received;
+	scripted([done([{ type: "text", text: "Visible answer" }])], {
+		onOptions: (selected, _context, options) => { received = { selected, options }; },
+	});
+	const result = await runModelTurn(ctxWith([custom]), {
+		speaker: "reviewer", model: "custom-provider/custom-model", reasoning: "auto",
+		systemPrompt: "S", messages: [],
+	});
+	assert.equal(received.selected, custom);
+	assert.equal(received.options.reasoning, undefined);
+	assert.equal(result.text, "Visible answer");
 });
 
 test("unsupported required reasoning rejects before inference instead of silently downgrading", async () => {
@@ -134,7 +141,7 @@ test("only visible text streams to onDelta; thinking and tool events never reach
 	);
 	const deltas = [];
 	const result = await runModelTurn(ctx, {
-		speaker: "opus",
+		speaker: "worker",
 		model: "anthropic/claude-opus-4-6",
 		systemPrompt: "SYS",
 		messages: [{ role: "user", content: "hi" }],
@@ -146,7 +153,7 @@ test("only visible text streams to onDelta; thinking and tool events never reach
 
 test("non-stop outcomes reject honestly with a sanitized detail", async () => {
 	const ctx = ctxWith([gpt]);
-	const args = { speaker: "astra", model: "openai-codex/gpt-6-astra", systemPrompt: "S", messages: [] };
+	const args = { speaker: "solo", model: "openai-codex/gpt-6-astra", systemPrompt: "S", messages: [] };
 	const run = () => runModelTurn(ctx, args);
 
 	scripted([{ type: "text_delta", contentIndex: 0, delta: "partial" }, done([{ type: "text", text: "partial" }], "length")]);
@@ -205,7 +212,7 @@ test("caller abort rejects as aborted even when the provider stream ends normall
 	const deltas = [];
 	await assert.rejects(
 		runModelTurn(ctx, {
-			speaker: "opus",
+			speaker: "worker",
 			model: "anthropic/claude-opus-4-6",
 			systemPrompt: "S",
 			messages: [],
@@ -224,7 +231,7 @@ test("caller abort rejects as aborted even when the provider stream ends normall
 		called = true;
 	};
 	await assert.rejects(
-		runModelTurn(ctx, { speaker: "opus", model: "anthropic/claude-opus-4-6", systemPrompt: "S", messages: [], signal: pre.signal }),
+		runModelTurn(ctx, { speaker: "worker", model: "anthropic/claude-opus-4-6", systemPrompt: "S", messages: [], signal: pre.signal }),
 		err => err.kind === "aborted",
 	);
 	assert.equal(called, false, "pre-aborted turns never open a request");

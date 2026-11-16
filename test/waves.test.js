@@ -2,7 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { parseWaves, prepareWaveCall, waveComplete } from "../waves.js";
 import { createFlow, expectNative, finishFlow, observeNative, planFlow } from "../flow.js";
-import { parseRoute, DEFAULTS } from "../protocol.js";
+import { parseRoute } from "../protocol.js";
+import { DEFAULT_MODELS } from "../model-config.js";
 
 const stages = () => [
   { id: "Inspect", title: "Inspect", goal: "Inspect the requested inputs", parallel: 2, dependsOn: [] },
@@ -11,7 +12,7 @@ const stages = () => [
 ];
 function run(waves = stages()) {
   const flow = createFlow("waves");
-  planFlow(flow, { route: "solo", reason: "Scoped work", waves: parseWaves(waves) }, DEFAULTS);
+  planFlow(flow, { route: "solo", reason: "Scoped work", waves: parseWaves(waves) }, DEFAULT_MODELS);
   return flow;
 }
 function admit(flow, names) {

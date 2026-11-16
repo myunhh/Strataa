@@ -8,6 +8,7 @@ import { paperSource, MAX_FILE_BYTES, pdfAvailable } from "./uploads.js";
 import { paperMarkdown, buildUpMarkdown } from "./export.js";
 import { getArisCatalog, loadArisSkills } from "../aris-skills.js";
 import { readFlowSessions } from "../flow-store.js";
+import { readModelConfig } from "../model-config.js";
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const LOCAL_SKILL = { name: "strataa-dashboard", description: "논문별 원문 근거·공통 Top-down 개념·연구 BuildUp과 Strataa 의사결정을 로컬 Dashboard에 기록합니다." };
@@ -42,15 +43,14 @@ function lookup(items, id) {
   return value;
 }
 
-export function createDashboard({ directory, analyzer, flowDirectory } = {}) {
+export function createDashboard({ directory, analyzer, flowDirectory, modelConfig = readModelConfig } = {}) {
   const store = createStore(directory || process.env.STRATAA_RESEARCH_DIR || path.join(process.env.XDG_DATA_HOME || path.join(homedir(), ".local", "share"), "omp-agent-dialogue", "research"));
   const skills = [...getArisCatalog(), LOCAL_SKILL];
-  const model = process.env.STRATAA_ANALYSIS_MODEL || "openai-codex/gpt-6-astra";
-  const capabilities = { pdf: pdfAvailable(), model, maxFileBytes: MAX_FILE_BYTES, maxAnalysisChars: 180000 };
+  const capabilities = { pdf: pdfAvailable(), maxFileBytes: MAX_FILE_BYTES, maxAnalysisChars: 180000 };
   const flows = () => readFlowSessions(flowDirectory ? { directory: flowDirectory } : {});
   let pending = null, abort = null;
   if (store.job().status === "running") store.saveJob({ ...store.job(), status: "failed", error: "이전 서버가 분석 도중 종료되었습니다. 자동 재실행하지 않았습니다.", finishedAt: new Date().toISOString() });
-  const stateResponse = () => ({ ...store.read(), skills, flows: flows(), analysisJob: store.job(), capabilities });
+  const stateResponse = () => ({ ...store.read(), skills, flows: flows(), analysisJob: store.job(), capabilities: { ...capabilities, ...modelConfig().analysis } });
   const server = http.createServer(async (req, res) => {
     res.setHeader("Cache-Control", "no-store");
     res.setHeader("X-Content-Type-Options", "nosniff");
@@ -114,10 +114,12 @@ export function createDashboard({ directory, analyzer, flowDirectory } = {}) {
           const analysis = await import("./analysis.js");
           if (pending || store.read().revision !== before.revision) throw new ResearchError("분석 준비 중 저장 상태가 바뀌었습니다. 새로고침 후 다시 시도하세요.", 409);
           analysis.buildAnalysisPrompt(papers, before.concepts); // Fail before acknowledging an oversized request.
-          const job = { status: "running", paperIds: input.paperIds, startedAt: new Date().toISOString(), error: null };
+          const { model, reasoning } = modelConfig().analysis;
+          if (input.model !== model || input.reasoning !== reasoning) throw new ResearchError("분석 모델 설정이 바뀌었습니다. 새로고침 후 모델·추론 강도를 확인하고 다시 동의하세요.", 409);
+          const job = { status: "running", model, reasoning, paperIds: input.paperIds, startedAt: new Date().toISOString(), error: null };
           store.saveJob(job);
           abort = new AbortController();
-          pending = Promise.resolve().then(() => (analyzer || analysis.analyzePapers)({ papers, concepts: before.concepts, model, signal: abort.signal }))
+          pending = Promise.resolve().then(() => (analyzer || analysis.analyzePapers)({ papers, concepts: before.concepts, model, reasoning, signal: abort.signal }))
             .then(result => {
               applyAnalysis(store, before.revision, result);
               store.saveJob({ ...job, status: "completed", finishedAt: new Date().toISOString() });

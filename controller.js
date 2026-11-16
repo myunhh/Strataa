@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { ARIS_ROUTES, DEFAULTS, DEFAULT_REVIEW_SKILL, collectContext, matchesRole, normalizeConfig, ROLES, ROUTER, SELECTABLE_ROLES, routeRequest } from "./protocol.js";
+import { ARIS_ROUTES, DEFAULT_REVIEW_SKILL, collectContext, routeRequest } from "./protocol.js";
 import { FLOW, createFlow, expectNative, finishFlow, flowText, nativeReference, observeNative, planFlow, publicText, restoreFlow, reviewProblem, startExecution, updateStage } from "./flow.js";
 import { REVIEWER_AGENT, WORKER_AGENT, arisHandoff, arisSpawnPolicy, createArisRun, escapeHarnessTags, hydrateReview, prepareArisCall, recordReview } from "./aris-runtime.js";
 import { prepareWaveCall, waveHandoff } from "./waves.js";
+import { DEFAULT_MODELS, MODEL_ROLES, ROLE_LABELS, normalizeModelConfig, readModelConfig, writeModelConfig, supportedReasoning, validateModelChoice, uniformModelConfig, taskModelSelector } from "./model-config.js";
 
 const STATE = "agent-dialogue-state";
 const CARD = "agent-dialogue";
@@ -13,44 +14,45 @@ const HELP = [
   "/strataa skills — 설치된 ARIS 스킬 목록과 실행 준비 상태",
   "/strataa flow — Wave 카드 그래프 · 노드 선택 · 공개 작업/결과 상세",
   "/strataa watch — 연결된 모든 OMP 세션의 공개 Flow 모니터",
-  "/strataa models — Fable Brain · Opus Worker · Astra 검토자 모델 선택",
-  "/strataa fable|opus|astra [provider/model] — 생략하면 선택창",
-  "ON = AUTO: Terra 6.1 xhigh가 Astra 단독 / ARIS 검토 / ARIS 연구 스킬을 선택합니다.",
-  `ARIS 경로: Fable이 분석·아이디어·종합을 맡고, native ${WORKER_AGENT}(Opus)가 실행, ${REVIEWER_AGENT}(Astra)가 독립 검토합니다.`,
+  "/strataa models — 전체 모델 · 전체 역할 일괄 선택 · 역할별 선택 · 추천 기본 조합",
+  "/strataa models all <provider/model> [effort] · models default",
+  `/strataa <${MODEL_ROLES.join("|")}> [provider/model] [effort] — 생략하면 선택창`,
+  "ON = AUTO: 설정한 Router가 Solo / ARIS 검토 / ARIS 연구를 선택합니다.",
+  `ARIS: Brain이 조정하고 ${WORKER_AGENT}가 실행하며 별도 ${REVIEWER_AGENT} 세션이 검토합니다. 같은 모델 선택은 교차 모델 검증이 아닙니다.`,
   "라우팅에는 최근 텍스트(최대 24,000자)와 요청/이미지를 전송하며 추가 사용량이 발생합니다.",
 ].join("\n");
 
 function restoredState(entries) {
-  let result = { enabled: false, ...DEFAULTS };
+  let result = { enabled: false, models: DEFAULT_MODELS };
   for (const entry of entries) {
     if (entry.type !== "custom" || entry.customType !== STATE) continue;
     const data = entry.data;
-    if (![1, 2, 3, 4].includes(data?.version) || typeof data.enabled !== "boolean") continue;
-    const required = data.version === 1 ? [] : data.version < 4 ? ["astra", "opus"] : SELECTABLE_ROLES;
-    if (!required.every(role => typeof data[role] === "string" && /^[^\s/]+\/\S+$/.test(data[role]))) continue;
-    // Upgrade the old built-in Opus default; retain custom selectors and all v4 choices.
-    const config = data.version === 1 ? {} : { ...data };
-    if (data.version < 4 && config.opus === "anthropic/claude-opus-4-6") config.opus = DEFAULTS.opus;
-    result = { enabled: data.enabled, ...normalizeConfig(config) };
+    if (![1, 2, 3, 4, 5].includes(data?.version) || typeof data.enabled !== "boolean") continue;
+    try {
+      if (data.version === 5) {
+        if (!data.models) continue;
+        result = { enabled: data.enabled, models: normalizeModelConfig(data.models) };
+        continue;
+      }
+      const required = data.version === 1 ? [] : data.version < 4 ? ["astra", "opus"] : ["fable", "opus", "astra"];
+      if (!required.every(role => typeof data[role] === "string" && /^[^\s/]+\/\S+$/.test(data[role]))) continue;
+      const models = { ...DEFAULT_MODELS };
+      if (data.version > 1) {
+        const worker = data.version < 4 && data.opus === "anthropic/claude-opus-4-6" ? DEFAULT_MODELS.worker.model : data.opus;
+        models.worker = { ...models.worker, model: worker };
+        models.reviewer = { ...models.reviewer, model: data.astra };
+        models.solo = { ...models.solo, model: data.astra };
+        if (data.version === 4) models.brain = { ...models.brain, model: data.fable };
+      }
+      result = { enabled: data.enabled, models: normalizeModelConfig(models) };
+    } catch { /* An invalid saved entry does not erase the last valid branch state. */ }
   }
   return result;
 }
 
 
-function assertModel(ctx, selector, role) {
-  const model = ctx.models.list().find(item => `${item.provider}/${item.id}` === selector);
-  const label = ROLES[role].label;
-  if (!model) throw new Error(`${label} 모델을 사용할 수 없습니다: ${selector}. /login 또는 /strataa models를 확인하세요.`);
-  if (!matchesRole(role, model, ctx.models.family(model))) {
-    throw new Error(`${label} 역할에 맞는 모델이 필요합니다: ${selector}`);
-  }
-  if (role === "router" && (!model.reasoning || !model.thinking?.efforts?.includes(ROUTER.reasoning))) {
-    throw new Error(`Terra 라우터는 ${ROUTER.reasoning} 지원이 필수입니다. 낮은 강도로 대체하지 않습니다.`);
-  }
-  if (role !== "router" && (!model.reasoning || !model.thinking?.efforts?.includes(ROLES[role].reasoning))) {
-    throw new Error(`${label} 역할은 ${ROLES[role].reasoning} 추론 강도가 필요합니다: ${selector}. 다른 모델로 대체하지 않습니다.`);
-  }
-  return model;
+function assertModel(ctx, config, role) {
+  return validateModelChoice(ctx.models.list(), config[role], ROLE_LABELS[role]);
 }
 
 /** Readiness of the ARIS path: installed bundle, native task tool, owned agents and all three models. */
@@ -65,15 +67,15 @@ function arisReadiness(pi, ctx, config, validateArisInstall) {
     const missing = [WORKER_AGENT, REVIEWER_AGENT].find(agent => !task.description.includes(`- \`${agent}\``));
     if (missing) problem = `${missing} 에이전트가 native task 목록에 없습니다. /reload-plugins가 필요합니다`;
   }
-  for (const role of SELECTABLE_ROLES) {
+  for (const role of ["brain", "worker", "reviewer"]) {
     if (problem) break;
-    try { assertModel(ctx, config[role], role); }
+    try { assertModel(ctx, config, role); }
     catch (error) { problem = error.message; }
   }
   return { install, problem };
 }
 
-const routeTitle = decision => decision.route === "solo" ? (decision.waves.length ? "Astra 주도" : "Astra 단독")
+const routeTitle = decision => decision.route === "solo" ? (decision.waves.length ? "Solo 주도" : "Solo 단독")
   : `${decision.route === "dialogue" ? "ARIS 검토" : "ARIS 연구"} · ${decision.skills.join(", ")}`;
 
 const isRecord = value => !!value && typeof value === "object" && !Array.isArray(value);
@@ -91,13 +93,13 @@ const observedRuns = new Set();
  */
 export function registerStrataa(pi, runModelTurn, createFlowView, skills, readAgentOutput = async id => {
   throw new Error(`agent://${id} 공개 출력을 읽을 수단이 호스트에 없음`);
-}, monitor = {}) {
+}, monitor = {}, modelSettings = { read: readModelConfig, write: writeModelConfig }) {
   const { getArisCatalog, loadArisSkills, validateArisInstall } = {
     getArisCatalog: () => skills.getArisCatalog(),
     loadArisSkills: names => skills.loadArisSkills(names),
     validateArisInstall: () => skills.validateArisInstall(),
   };
-  let state = { enabled: false, ...DEFAULTS };
+  let state = { enabled: false, models: DEFAULT_MODELS };
   let active;
   let unsubscribe;
   let revision = 0;
@@ -120,12 +122,14 @@ export function registerStrataa(pi, runModelTurn, createFlowView, skills, readAg
   const card = (content, details = {}) => pi.sendMessage({
     customType: CARD, content, display: true, details,
   }, { triggerTurn: false });
-  const status = ctx => ctx.ui.setStatus(CARD, state.enabled ? "Strataa AUTO · Terra → Astra / Fable Brain · Opus Worker · Astra 검토" : undefined);
+  const status = ctx => ctx.ui.setStatus(CARD, state.enabled ? "Strataa AUTO · Router → Solo / Brain · Worker · Reviewer" : undefined);
   const persist = ctx => {
     revision++;
-    pi.appendEntry(STATE, { version: 4, ...state });
+    pi.appendEntry(STATE, { version: 5, ...state });
     status(ctx);
   };
+  const refreshModels = () => { state.models = modelSettings.read({ fallback: state.models }); };
+  const saveModels = models => { state.models = modelSettings.write(normalizeModelConfig(models)); };
   const owns = run => active === run && !run.controller.signal.aborted &&
     run.ctx.sessionManager.getSessionId() === run.sessionId;
 
@@ -157,14 +161,14 @@ export function registerStrataa(pi, runModelTurn, createFlowView, skills, readAg
       run.ctx.sessionManager.getSessionId() === run.sessionId;
     try {
       const summary = await monitor.summarizePrompt(run.ctx, {
-        text: run.text, imageCount: run.images.length, signal: run.controller.signal,
+        text: run.text, imageCount: run.images.length, signal: run.controller.signal, config: run.config.summary,
       });
       if (!current()) return;
       if (run.controller.signal.aborted) throw run.controller.signal.reason;
       run.flow.promptSummary = { status: "completed", model: summary.model, text: publicText(summary.text) };
     } catch (error) {
       if (!current()) return;
-      run.flow.promptSummary = { status: "failed", model: monitor.summaryModel,
+      run.flow.promptSummary = { status: "failed", model: run.config.summary.model,
         error: publicText(error instanceof Error ? error.message : String(error)) };
     }
     paint(run, true);
@@ -316,40 +320,57 @@ export function registerStrataa(pi, runModelTurn, createFlowView, skills, readAg
     }
   }
 
-  async function pickModels(ctx, roles) {
-    if (!ctx.hasUI) throw new Error("모델 선택창에는 UI가 필요합니다. /strataa <fable|opus|astra> <provider/model>을 사용하세요.");
+  async function pickModels(ctx, role) {
+    if (!ctx.hasUI) throw new Error("모델 선택창에는 UI가 필요합니다. /strataa models all <provider/model> [effort] 또는 /strataa <role> <provider/model> [effort]를 사용하세요.");
     const sessionId = ctx.sessionManager.getSessionId();
     const startedAtRevision = revision;
-    const selected = {};
+    const previous = state.models;
+    const fingerprint = JSON.stringify(previous);
     const assertCurrent = () => {
-      if (revision !== startedAtRevision || sessionId !== ctx.sessionManager.getSessionId() || active) {
+      if (revision !== startedAtRevision || sessionId !== ctx.sessionManager.getSessionId() || active ||
+          JSON.stringify(modelSettings.read({ fallback: state.models })) !== fingerprint) {
         throw new Error("세션·설정 또는 실행 상태가 변경되어 모델 선택을 적용하지 않았습니다. 선택창을 다시 여세요.");
       }
     };
-    for (const [index, role] of roles.entries()) {
+    const select = async (title, options) => {
       assertCurrent();
-      const speaker = ROLES[role].label;
-      const current = state[role];
-      const options = ctx.models.list()
-        .filter(model => matchesRole(role, model, ctx.models.family(model)))
-        .map(model => {
-          const selector = `${model.provider}/${model.id}`;
-          return { label: selector, description: `${ROLES[role].duty} · ${ROLES[role].reasoning} · ${model.name || model.id}${selector === current ? " · 현재 선택" : ""}` };
-        })
-        .sort((a, b) => Number(b.label === current) - Number(a.label === current) || a.label.localeCompare(b.label));
-      if (!options.length) throw new Error(`인증된 ${speaker} 모델이 없습니다. /login 후 다시 선택하세요.`);
-      const choice = await ctx.ui.select(`${speaker} 모델 선택 (${index + 1}/${roles.length}) — 현재: ${current}`, options);
+      const value = await ctx.ui.select(title, options);
       assertCurrent();
-      if (choice === undefined) {
-        ctx.ui.notify("모델 선택을 취소했습니다. 기존 설정을 유지합니다.", "info");
-        return false;
-      }
-      if (!options.some(option => option.label === choice)) throw new Error("목록에 없는 모델은 선택할 수 없습니다.");
-      selected[role] = choice;
+      if (value === undefined) return;
+      if (!options.some(option => option.label === value)) throw new Error("목록에 없는 항목은 선택할 수 없습니다.");
+      return value;
+    };
+    if (!role) {
+      const mode = await select("Strataa Models — 이 호스트의 다음 실행부터 적용", [
+        { label: "전체 역할에 같은 모델", description: "Router · Brain · Worker · Reviewer · Solo · 요약 · Dashboard 분석" },
+        { label: "역할별 모델 선택", description: "전체 모델 목록과 지원 추론 강도에서 역할별 선택" },
+        { label: "추천 기본 조합 복원", description: "Terra · Fable · Opus · Astra · Luna — 기존 기본 조합" },
+      ]);
+      if (mode === undefined) return false;
+      if (mode === "추천 기본 조합 복원") { saveModels(DEFAULT_MODELS); return true; }
+      if (mode === "역할별 모델 선택") {
+        const chosen = await select("변경할 역할", MODEL_ROLES.map(key => ({
+          label: ROLE_LABELS[key], description: `${previous[key].model} · ${previous[key].reasoning}`,
+        })));
+        if (chosen === undefined) return false;
+        role = MODEL_ROLES.find(key => ROLE_LABELS[key] === chosen);
+      } else role = "all";
     }
-    // Commit all roles together; cancelling any menu preserves the previous set.
-    for (const role of roles) assertModel(ctx, selected[role], role);
-    Object.assign(state, selected);
+    const current = previous[role === "all" ? "solo" : role];
+    const options = ctx.models.list().map(model => {
+      const selector = `${model.provider}/${model.id}`;
+      return { label: selector, description: `${model.name || model.id}${selector === current.model ? " · 현재 선택" : ""}` };
+    }).sort((a, b) => Number(b.label === current.model) - Number(a.label === current.model) || a.label.localeCompare(b.label));
+    if (!options.length) throw new Error("선택 가능한 모델이 없습니다. /login을 확인하세요.");
+    const model = await select(`${role === "all" ? "전체 역할" : ROLE_LABELS[role]} 모델 — 전체 목록`, options);
+    if (model === undefined) return false;
+    const metadata = ctx.models.list().find(item => `${item.provider}/${item.id}` === model);
+    if (!metadata) throw new Error("선택한 모델이 더 이상 제공되지 않습니다.");
+    const reasoning = await select("추론 강도 — auto는 모델 기본값, 명시 강도는 자동 하향하지 않음",
+      supportedReasoning(metadata).map(level => ({ label: level, description: level === "auto" ? "모델 기본값" : `${level}${model === current.model && level === current.reasoning ? " · 현재 선택" : ""}` })));
+    if (reasoning === undefined) return false;
+    validateModelChoice(ctx.models.list(), { model, reasoning });
+    saveModels(role === "all" ? uniformModelConfig(model, reasoning) : { ...previous, [role]: { model, reasoning } });
     return true;
   }
 
@@ -363,25 +384,25 @@ export function registerStrataa(pi, runModelTurn, createFlowView, skills, readAg
         const { problem } = arisReadiness(pi, run.ctx, run.config, validateArisInstall);
         if (problem) throw new Error(problem);
       }
-      const role = aris ? "fable" : "astra";
+      const role = aris ? "brain" : "solo";
       const taskLabel = aris ? `Brain · ${decision.skills.join(", ")}` : decision.waves.length ? "Wave 조정" : "단독 처리";
-      const model = assertModel(run.ctx, run.config[role], role);
-      run.flow.note = `${ROLES[role].label} ${taskLabel} 준비 중`;
+      const model = assertModel(run.ctx, run.config, role);
+      run.flow.note = `${ROLE_LABELS[role]} ${taskLabel} 준비 중`;
       paint(run);
-      if (!await pi.setModel(model)) throw new Error(`${ROLES[role].label} 실행 모델로 전환하지 못했습니다.`);
+      if (!await pi.setModel(model)) throw new Error(`${ROLE_LABELS[role]} 실행 모델로 전환하지 못했습니다.`);
       if (!owns(run)) return;
       const current = run.ctx.models.current();
       if (!run.ctx.isIdle() || current?.provider !== model.provider || current?.id !== model.id) {
         throw new Error("실행 상태 또는 모델이 변경되어 요청을 전달하지 않았습니다.");
       }
-      pi.setThinkingLevel(ROLES[role].reasoning);
+      pi.setThinkingLevel(run.config[role].reasoning);
       // The full selected SKILL.md bodies are already loaded in run.aris: the handoff precedes the prompt.
       pi.sendMessage({
         customType: CARD, display: false,
         content: `${aris ? arisHandoff(run.aris, AGENTS_DIR)
-          : "Terra가 이 요청을 Astra 주도 일반 작업으로 분류했습니다. ARIS 스킬은 필요하지 않습니다. 원본 근거와 제약을 확인하고 수치·논리·코드 불변식을 점검한 뒤 필요한 최소 작업을 직접 수행·검증하세요. 관측과 추론, 검증하지 못한 부분을 구분하고 아래 Terra Wave 계획에 따라 필요한 작업만 위임하세요."}\n\n${waveHandoff(decision.waves)}`,
-        details: { runId: run.id, phase: "handoff", ...decision, speaker: role, model: run.config[role], reasoning: ROLES[role].reasoning,
-          ...(aris ? { worker: { agent: WORKER_AGENT, model: run.config.opus }, reviewer: { agent: REVIEWER_AGENT, model: run.config.astra }, install: run.aris.install, reviewRequired: run.aris.reviewRequired } : {}) },
+          : `Router가 이 요청을 Solo 주도 일반 작업으로 분류했습니다. ARIS 스킬은 필요하지 않습니다. 원본 근거와 제약을 확인하고 필요한 최소 작업을 직접 수행·검증하세요. 위임 작업은 사용자가 설정한 Worker ${run.config.worker.model} · ${run.config.worker.reasoning}로 실행됩니다. 다른 모델·외부 에이전트로 우회하지 마세요. 관측과 추론, 검증하지 못한 부분을 구분하세요.`}\n\n${waveHandoff(decision.waves)}`,
+        details: { runId: run.id, phase: "handoff", ...decision, speaker: role, ...run.config[role],
+          ...(aris ? { worker: { agent: WORKER_AGENT, ...run.config.worker }, reviewer: { agent: REVIEWER_AGENT, ...run.config.reviewer }, install: run.aris.install, reviewRequired: run.aris.reviewRequired } : {}) },
       }, { triggerTurn: false, deliverAs: "nextTurn" });
       execution = { sessionId: run.sessionId, role, run };
       run.paint = save => paint(run, save);
@@ -393,7 +414,7 @@ export function registerStrataa(pi, runModelTurn, createFlowView, skills, readAg
       startExecution(run.flow);
       run.flow.note = "공개 실행 기록 · native 작업 카드는 실행 결과 원문 · Esc 중단";
       paint(run, true);
-      run.ctx.ui.setStatus(CARD, `Strataa AUTO · ${ROLES[role].label} ${taskLabel}`);
+      run.ctx.ui.setStatus(CARD, `Strataa AUTO · ${ROLE_LABELS[role]} ${taskLabel}`);
       // Programmatic prompts bypass the external input hook: no routing recursion.
       pi.sendUserMessage([{ type: "text", text: run.text }, ...run.images]);
       active = undefined;
@@ -405,11 +426,11 @@ export function registerStrataa(pi, runModelTurn, createFlowView, skills, readAg
   async function perform(run) {
     const args = {
       prompt: run.text, images: run.images, context: run.context, cwd: run.ctx.cwd,
-      signal: run.controller.signal, runTurn: options => runModelTurn(run.ctx, options),
+      signal: run.controller.signal, runTurn: options => runModelTurn(run.ctx, options), config: run.config,
     };
     try {
       if (!owns(run)) return;
-      run.ctx.ui.setStatus(CARD, "Strataa AUTO · Terra 6.1 xhigh 라우팅");
+      run.ctx.ui.setStatus(CARD, `Strataa AUTO · Router ${run.config.router.model} · ${run.config.router.reasoning}`);
       paint(run, true);
       const decision = await routeRequest({ ...args, catalog: getArisCatalog() });
       if (!owns(run)) return;
@@ -420,8 +441,8 @@ export function registerStrataa(pi, runModelTurn, createFlowView, skills, readAg
       }
       planFlow(run.flow, decision, run.config, { reviewRequired: run.aris?.reviewRequired });
       paint(run, true);
-      card(`**Terra 라우팅 → ${routeTitle(decision)}**\n\n${decision.reason}\n\n${decision.waves.length ? decision.waves.map(stage => `Wave ${stage.wave} · ${stage.title} · 선행 ${stage.dependsOn.join(", ") || "없음"} · 동시 최대 ${stage.parallel}`).join("\n") : "위임 Wave 없음 · 메인 직접 처리"}`, {
-        runId: run.id, phase: "route", ...decision, model: ROUTER.model, reasoning: ROUTER.reasoning,
+      card(`**Router → ${routeTitle(decision)}**\n\n${decision.reason}\n\n${decision.waves.length ? decision.waves.map(stage => `Wave ${stage.wave} · ${stage.title} · 선행 ${stage.dependsOn.join(", ") || "없음"} · 동시 최대 ${stage.parallel}`).join("\n") : "위임 Wave 없음 · 메인 직접 처리"}`, {
+        runId: run.id, phase: "route", ...decision, ...run.config.router,
       });
       if (owns(run)) await dispatch(run, decision);
     } catch (error) {
@@ -447,6 +468,8 @@ export function registerStrataa(pi, runModelTurn, createFlowView, skills, readAg
     if (!isMain(ctx)) return;
     revision++;
     state = restoredState(ctx.sessionManager.getBranch());
+    try { refreshModels(); }
+    catch (error) { state.enabled = false; ctx.ui.notify(error.message, "error"); }
     status(ctx);
     const flow = restoreFlow(ctx.sessionManager.getBranch());
     if (flow?.promptSummary?.status === "running") {
@@ -629,9 +652,14 @@ export function registerStrataa(pi, runModelTurn, createFlowView, skills, readAg
     try {
       const prepared = prepareWaveCall(run.flow, event.input);
       if (run.aris) prepared.input = prepareArisCall(run.aris, prepared.input, prepared.bindings);
-      run.flow.nextWaveTask = prepared.nextName;
-      // Reserve every independent stage in the native batch before another call can consume capacity.
       const tasks = prepared.input.tasks ?? [prepared.input];
+      for (const task of tasks) {
+        const role = task.agent === REVIEWER_AGENT ? "reviewer" : "worker";
+        assertModel(ctx, run.config, role);
+        task.model = taskModelSelector(run.config[role]);
+      }
+      run.flow.nextWaveTask = prepared.nextName;
+      // Validate the whole batch before reserving any stage or name.
       tasks.forEach((task, index) => {
         expectNative(run.flow, task.agent || "task", task.name, {
           ...task, waveId: prepared.bindings[index].waveId, context: prepared.input.context, parentId: "final",
@@ -647,8 +675,13 @@ export function registerStrataa(pi, runModelTurn, createFlowView, skills, readAg
     if (run && (!isMain(ctx) || event.invocationKind !== "task")) return {
       block: true, reason: "Terra Wave의 위임은 메인 세션의 native task만 사용합니다. 재귀·eval·외부 대체 실행은 허용되지 않습니다.",
     };
-    const policy = run?.aris ? arisSpawnPolicy(run.aris, event) : undefined;
-    return policy;
+    if (!run) return;
+    const policy = run.aris ? arisSpawnPolicy(run.aris, event) : undefined;
+    if (policy?.block) return policy;
+    const role = event.agent === REVIEWER_AGENT ? "reviewer" : "worker";
+    try { assertModel(ctx, run.config, role); }
+    catch (error) { return { block: true, reason: error.message }; }
+    return policy ?? { model: taskModelSelector(run.config[role]) };
   });
 
   pi.on("tool_execution_start", (event, ctx) => {
@@ -847,8 +880,9 @@ export function registerStrataa(pi, runModelTurn, createFlowView, skills, readAg
     interruptExecution("새 요청으로 이전 실행 화면의 추적을 종료했습니다.");
     abortSummary("새 요청으로 이전 요청 요약을 중단했습니다.");
     try {
-      assertModel(ctx, ROUTER.model, "router");
-      assertModel(ctx, state.astra, "astra");
+      refreshModels();
+      assertModel(ctx, state.models, "router");
+      assertModel(ctx, state.models, "solo");
       validateArisInstall();
     } catch (error) {
       card(`**라우팅 준비 확인 필요 — 실행하지 않음**\n\n${error.message}`, { phase: "error" });
@@ -862,14 +896,14 @@ export function registerStrataa(pi, runModelTurn, createFlowView, skills, readAg
       sessionFile: ctx.sessionManager.getSessionFile?.(),
       text: event.text, images: [...(event.images ?? [])],
       context: collectContext(ctx.sessionManager.getBranch()),
-      config: { ...state }, lastPaint: 0, toolCalls: new Map(), reviewNotes: new Set(), workerNotes: new Set(),
+      config: state.models, lastPaint: 0, toolCalls: new Map(), reviewNotes: new Set(), workerNotes: new Set(),
       agentParents: new Map(), publicOutputs: new Map(),
     };
-    run.flow = createFlow(run.id, run.text);
-    if (monitor.summarizePrompt) run.flow.promptSummary = { status: "running", model: monitor.summaryModel };
+    run.flow = createFlow(run.id, run.text, run.config);
+    if (monitor.summarizePrompt) run.flow.promptSummary = { status: "running", model: run.config.summary.model };
     active = run;
     paint(run, true);
-    card(`**자동 라우팅 요청**\n\n${event.text}\n\nTerra 6.1 xhigh → Astra 단독 / ARIS 검토 / ARIS 연구 · /strataa stop 또는 Esc로 중단`, { runId: run.id, phase: "request" });
+    card(`**자동 라우팅 요청**\n\n${event.text}\n\nRouter ${run.config.router.model} · ${run.config.router.reasoning} → Solo / ARIS 검토 / ARIS 연구 · /strataa stop 또는 Esc로 중단`, { runId: run.id, phase: "request" });
     if (monitor.summarizePrompt) void summarizePrompt(run);
     // Input hooks have a 30s host budget. Return immediately; manage lifetime
     // ourselves instead of allowing timeout to dispatch the task prematurely.
@@ -881,17 +915,21 @@ export function registerStrataa(pi, runModelTurn, createFlowView, skills, readAg
     try { const install = validateArisInstall(); return `ARIS: ${install.count}개 스킬 · commit ${String(install.commit).slice(0, 12)} · ${install.root}`; }
     catch (error) { return `ARIS 설치 문제: ${error instanceof Error ? error.message : String(error)}`; }
   };
-  const describe = () => `**Strataa ${state.enabled ? "AUTO (ON)" : "OFF"}**\n\nRouter: \`${ROUTER.model}\` · ${ROUTER.reasoning}\n${SELECTABLE_ROLES.map(role => `${ROLES[role].label} — ${ROLES[role].duty}: \`${state[role]}\` · ${ROLES[role].reasoning}`).join("\n")}\nWorker: \`${WORKER_AGENT}\` · 검토자: \`${REVIEWER_AGENT}\` · ${installSummary()} · /strataa skills`;
+  const describe = () => `**Strataa ${state.enabled ? "AUTO (ON)" : "OFF"}**\n\n${MODEL_ROLES.map(role => `${ROLE_LABELS[role]}: \`${state.models[role].model}\` · ${state.models[role].reasoning}`).join("\n")}\n\n같은 모델을 사용해도 검토 세션은 별도이며, 별도 세션은 교차 모델 검증을 보장하지 않습니다.\nWorker: \`${WORKER_AGENT}\` · 검토자: \`${REVIEWER_AGENT}\` · ${installSummary()} · /strataa skills`;
 
   pi.registerCommand("strataa", {
-    description: "Terra 라우팅: Astra 단독 / Fable Brain → Opus Worker + Astra 독립 검토",
+    description: "설정한 모델로 자동 라우팅 · 연구 · 실행 · 별도 세션 검토",
     getArgumentCompletions(prefix) {
-      return ["models", "skills", "flow", "watch", "on", "off", "status", "stop", ...SELECTABLE_ROLES, "help"]
+      return ["models", "skills", "flow", "watch", "on", "off", "status", "stop", ...MODEL_ROLES, "help"]
         .filter(value => value.startsWith(prefix)).map(value => ({ value, label: value }));
     },
     async handler(args, ctx) {
       if (!isMain(ctx)) return;
       const [action = state.enabled ? "off" : "on", ...rest] = args.trim().split(/\s+/).filter(Boolean);
+      if (["models", "skills", "status", "on", ...MODEL_ROLES].includes(action) && !(action === "models" && rest[0] === "default")) {
+        try { refreshModels(); }
+        catch (error) { ctx.ui.notify(error.message, "error"); return; }
+      }
       if (action === "help") { card(HELP, { phase: "status" }); return; }
       if (action === "stop") {
         cancel("/strataa stop");
@@ -905,7 +943,7 @@ export function registerStrataa(pi, runModelTurn, createFlowView, skills, readAg
         return;
       }
       if (action === "status") {
-        card(`${describe()}\n\n${active ? "라우팅·검토 진행 중" : execution ? `${ROLES[execution.role].label} 응답 진행 중` : "대기 중"}\n\n${HELP}`, { phase: "status" });
+        card(`${describe()}\n\n${active ? "라우팅·검토 진행 중" : execution ? `${ROLE_LABELS[execution.role]} 응답 진행 중` : "대기 중"}\n\n${HELP}`, { phase: "status" });
         return;
       }
       if (action === "watch") {
@@ -917,15 +955,15 @@ export function registerStrataa(pi, runModelTurn, createFlowView, skills, readAg
         return;
       }
       if (action === "skills") {
-        const { install, problem } = arisReadiness(pi, ctx, state, validateArisInstall);
+        const { install, problem } = arisReadiness(pi, ctx, state.models, validateArisInstall);
         let catalog = [];
         if (install) {
           try { catalog = getArisCatalog(); }
           catch (error) { ctx.ui.notify(error instanceof Error ? error.message : String(error), "error"); return; }
         }
-        card(`**ARIS 스킬 ${catalog.length}개 — ${problem ? `실행 불가: ${problem}` : "실행 준비 완료"}**\n\n${installSummary()}\nBrain Fable: ${state.fable} · ${ROLES.fable.reasoning}\nWorker ${WORKER_AGENT} · Opus: ${state.opus} · ${ROLES.opus.reasoning}\n검토자 ${REVIEWER_AGENT} · Astra: ${state.astra} · ${ROLES.astra.reasoning}\n\n${catalog.map(skill =>
+        card(`**ARIS 스킬 ${catalog.length}개 — ${problem ? `실행 불가: ${problem}` : "실행 준비 완료"}**\n\n${installSummary()}\n${["brain", "worker", "reviewer"].map(role => `${ROLE_LABELS[role]}: ${state.models[role].model} · ${state.models[role].reasoning}`).join("\n")}\n\n${catalog.map(skill =>
           `- \`${skill.name}\`${skill.name === DEFAULT_REVIEW_SKILL ? " (검토 기본값)" : ""} — ${String(skill.description ?? "").replace(/\s+/g, " ").trim()}`
-        ).join("\n")}\n\nTerra는 요청에 필요한 스킬 1–4개만 선택합니다. Fable이 스킬 원문에 따라 분석·아이디어·계획·최종 종합을 맡고, 필요한 실행만 native ${WORKER_AGENT}(Opus)에 위임합니다. 독립 검토는 native ${REVIEWER_AGENT}(Astra)가 수행하며 모델과 출력이 확인된 라운드만 검토로 인정합니다. 계획·아이디어 요청은 실행 권한을 추가하지 않습니다.`,
+        ).join("\n")}\n\nRouter는 필요한 스킬 1–4개만 선택합니다. Brain은 분석·계획·최종 종합, Worker는 구체 실행, Reviewer는 별도 읽기 전용 세션 검토를 맡습니다. 모델과 공개 출력이 확인된 라운드만 검토로 인정하며, 같은 모델의 별도 세션은 교차 모델 검증이 아닙니다. 스킬 선택은 실행 권한을 추가하지 않습니다.`,
         { phase: "status", skills: catalog.map(skill => skill.name), available: !problem, problem, install });
         return;
       }
@@ -937,25 +975,30 @@ export function registerStrataa(pi, runModelTurn, createFlowView, skills, readAg
         if (action === "on" || action === "off") {
           if (rest.length) throw new Error(HELP);
           if (action === "on") {
-            assertModel(ctx, ROUTER.model, "router");
-            assertModel(ctx, state.astra, "astra");
+            assertModel(ctx, state.models, "router");
+            assertModel(ctx, state.models, "solo");
             validateArisInstall();
           } else cancel("대화 모드를 껐습니다.");
           state.enabled = action === "on";
         } else if (action === "models") {
-          if (rest.length) throw new Error("/strataa models");
-          if (!await pickModels(ctx, SELECTABLE_ROLES)) return;
-        } else if (SELECTABLE_ROLES.includes(action)) {
-          if (rest.length === 0) {
-            if (!await pickModels(ctx, [action])) return;
-          } else {
-            if (rest.length !== 1) throw new Error(`/strataa ${action} [provider/model]`);
-            assertModel(ctx, rest[0], action);
-            state[action] = rest[0];
+          if (!rest.length) { if (!await pickModels(ctx)) return; }
+          else if (rest.length === 1 && rest[0] === "default") saveModels(DEFAULT_MODELS);
+          else if (rest[0] === "all" && rest.length >= 2 && rest.length <= 3) {
+            const models = uniformModelConfig(rest[1], rest[2] || "auto");
+            validateModelChoice(ctx.models.list(), models.solo);
+            saveModels(models);
+          } else throw new Error("/strataa models · models all <provider/model> [effort] · models default");
+        } else if (MODEL_ROLES.includes(action)) {
+          if (!rest.length) { if (!await pickModels(ctx, action)) return; }
+          else {
+            if (rest.length > 2) throw new Error(`/strataa ${action} [provider/model] [effort]`);
+            const models = normalizeModelConfig({ ...state.models, [action]: { model: rest[0], reasoning: rest[1] || "auto" } });
+            assertModel(ctx, models, action);
+            saveModels(models);
           }
         } else throw new Error(HELP);
         persist(ctx);
-        card(`${describe()}\n\n${state.enabled ? `Terra가 경로와 필요한 ARIS 스킬을 선택합니다. 일반 작업은 Astra 단독, 검토·연구 요청은 Fable Brain이 이끌며 Opus Worker가 실행하고 Astra가 독립 검토합니다. 실행·검토 단계에 추가 사용량이 발생합니다. /strataa off로 해제합니다.` : "자동 라우팅을 끕니다. 현재 세션 모델은 유지하며 /model로 변경할 수 있습니다."}`, { phase: "status" });
+        card(`${describe()}\n\n${state.enabled ? "다음 요청부터 이 설정으로 라우팅·실행합니다. 진행 중인 실행은 시작할 때의 모델 설정을 유지합니다. 추가 모델 사용량이 발생하며 /strataa off로 자동 라우팅을 해제합니다." : "자동 라우팅은 OFF입니다. 모델 설정은 같은 호스트의 Strataa와 Dashboard에 저장되며 /strataa on으로 라우팅을 켭니다. 현재 OMP 모델은 유지합니다."}`, { phase: "status" });
       } catch (error) {
         ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
       }

@@ -7,10 +7,11 @@ import path from "node:path";
 import { createDashboard } from "../dashboard/server.js";
 import { createStore } from "../dashboard/store.js";
 import { pdfAvailable } from "../dashboard/uploads.js";
+import { DEFAULT_MODELS, normalizeModelConfig } from "../model-config.js";
 
 async function serve(t, options = {}) {
   const directory = await mkdtemp(path.join(tmpdir(), "strataa-dashboard-test-"));
-  const app = createDashboard({ directory, flowDirectory: path.join(directory, "flows"), ...options });
+  const app = createDashboard({ directory, flowDirectory: path.join(directory, "flows"), modelConfig: () => DEFAULT_MODELS, ...options });
   await new Promise(resolve => app.server.listen(0, "127.0.0.1", resolve));
   const base = `http://127.0.0.1:${app.server.address().port}`;
   let stopped = false;
@@ -35,9 +36,9 @@ async function hierarchy(app) {
   for (const [index, level] of levels.entries()) concepts.push(await app.save("/api/concepts", { name: ["Learning", "Retrieval", "Dense retrieval", "Contrastive learning"][index], description: level, level, parentId: concepts.at(-1)?.id || null, review: "draft" }));
   return concepts;
 }
-function analysisResult(papers) {
+function analysisResult(papers, selection = DEFAULT_MODELS.analysis) {
   const concepts = levels.map((level, index) => ({ id: `shared-${level}`, name: ["Learning", "Retrieval", "Dense retrieval", "Contrastive learning"][index], description: level, level, parentId: index ? `shared-${levels[index - 1]}` : null }));
-  return { model: "openai-codex/gpt-6-astra", concepts, papers: papers.map(paper => ({ id: paper.id, summary: "Retrieval study", problem: "Retrieval quality", method: "Dense retrieval", findings: "Reported recall improvements", limitations: "Dataset-specific; no general claim", conceptLinks: concepts.map(concept => ({ conceptId: concept.id, quote: "We compare dense retrieval using contrastive learning.", note: "Reported method" })) })) };
+  return { ...selection, concepts, papers: papers.map(paper => ({ id: paper.id, summary: "Retrieval study", problem: "Retrieval quality", method: "Dense retrieval", findings: "Reported recall improvements", limitations: "Dataset-specific; no general claim", conceptLinks: concepts.map(concept => ({ conceptId: concept.id, quote: "We compare dense retrieval using contrastive learning.", note: "Reported method" })) })) };
 }
 async function waitJob(app) {
   for (let attempt = 0; attempt < 200; attempt++) {
@@ -123,7 +124,7 @@ test("analysis stores grounded shared paths atomically and does not replace user
   const first = await app.save("/api/papers", { title: "A", text: source });
   const second = await app.save("/api/papers", { title: "B", text: source });
   const revision = (await app.state()).revision;
-  assert.equal((await app.request("/api/analyze", { revision, paperIds: [first.id, second.id] })).status, 202);
+  assert.equal((await app.request("/api/analyze", { revision, paperIds: [first.id, second.id], ...DEFAULT_MODELS.analysis })).status, 202);
   assert.equal((await app.request("/api/analyze", { revision, paperIds: [first.id] })).status, 409);
   await app.save(`/api/papers/${first.id}`, { notes: "Human edited while model worked" }, "PUT");
   release();
@@ -132,12 +133,73 @@ test("analysis stores grounded shared paths atomically and does not replace user
   assert.equal(rejected.concepts.length, 0);
   assert.equal(rejected.papers[0].analysis, null);
   assert.equal(rejected.papers[0].notes, "Human edited while model worked");
-  assert.equal((await app.request("/api/analyze", { revision: rejected.revision, paperIds: [first.id, second.id] })).status, 202);
+  assert.equal((await app.request("/api/analyze", { revision: rejected.revision, paperIds: [first.id, second.id], ...DEFAULT_MODELS.analysis })).status, 202);
   const finished = await waitJob(app);
   assert.equal(finished.analysisJob.status, "completed", finished.analysisJob.error);
-  assert.equal(finished.papers[0].analysis.model, "openai-codex/gpt-6-astra");
+  assert.equal(finished.papers[0].analysis.model, DEFAULT_MODELS.analysis.model);
   assert.equal(finished.papers[0].conceptLinks[3].conceptId, finished.papers[1].conceptLinks[3].conceptId);
   assert.ok(finished.concepts.every(concept => concept.review === "draft"));
+});
+
+test("state and analysis starts read shared models while running jobs retain their snapshot and ignore the old environment override", async t => {
+  const previous = process.env.STRATAA_ANALYSIS_MODEL;
+  process.env.STRATAA_ANALYSIS_MODEL = "obsolete-provider/obsolete-model";
+  let release;
+  const delayed = new Promise(resolve => { release = resolve; });
+  t.after(() => {
+    release();
+    if (previous === undefined) delete process.env.STRATAA_ANALYSIS_MODEL;
+    else process.env.STRATAA_ANALYSIS_MODEL = previous;
+  });
+  let config = DEFAULT_MODELS;
+  const seen = [];
+  const app = await serve(t, {
+    modelConfig: () => config,
+    analyzer: async ({ papers, model, reasoning }) => {
+      seen.push({ model, reasoning });
+      if (seen.length > 1) throw new Error("Fixture analysis rejected");
+      await delayed;
+      return analysisResult(papers, { model, reasoning });
+    },
+  });
+  const initial = await app.state();
+  assert.equal(initial.capabilities.model, DEFAULT_MODELS.analysis.model);
+  assert.equal(initial.capabilities.reasoning, DEFAULT_MODELS.analysis.reasoning);
+  const paper = await app.save("/api/papers", { title: "Shared model profile", text: source });
+  const revision = (await app.state()).revision;
+  const first = { model: "research-provider/first-model", reasoning: "low" };
+  config = normalizeModelConfig({ ...DEFAULT_MODELS, analysis: first });
+  const stale = await app.request("/api/analyze", { revision, paperIds: [paper.id], ...DEFAULT_MODELS.analysis });
+  assert.equal(stale.status, 409);
+  assert.deepEqual(seen, [], "a stale model consent must not send sources to a different provider");
+  const start = await app.request("/api/analyze", { revision, paperIds: [paper.id], ...first });
+  assert.equal(start.status, 202);
+  assert.equal(start.value.model, first.model);
+  assert.equal(start.value.reasoning, first.reasoning);
+  const next = { model: "another-provider/next-model", reasoning: "auto" };
+  config = normalizeModelConfig({ ...DEFAULT_MODELS, analysis: next });
+  const running = await app.state();
+  assert.equal(running.capabilities.model, next.model);
+  assert.equal(running.capabilities.reasoning, next.reasoning);
+  assert.equal(running.analysisJob.status, "running");
+  assert.equal(running.analysisJob.model, first.model);
+  assert.equal(running.analysisJob.reasoning, first.reasoning);
+  assert.deepEqual(seen, [first]);
+  release();
+  const finished = await waitJob(app);
+  assert.equal(finished.analysisJob.status, "completed", finished.analysisJob.error);
+  assert.equal(finished.analysisJob.model, first.model);
+  assert.equal(finished.analysisJob.reasoning, first.reasoning);
+  assert.equal(finished.papers[0].analysis.model, first.model);
+  const second = await app.request("/api/analyze", { revision: finished.revision, paperIds: [paper.id], ...next });
+  assert.equal(second.status, 202);
+  assert.equal(second.value.model, next.model);
+  assert.equal(second.value.reasoning, next.reasoning);
+  const failed = await waitJob(app);
+  assert.equal(failed.analysisJob.status, "failed");
+  assert.equal(failed.analysisJob.model, next.model);
+  assert.equal(failed.analysisJob.reasoning, next.reasoning);
+  assert.deepEqual(seen, [first, next]);
 });
 
 test("captured public flow remains linked after its publisher disappears", async t => {

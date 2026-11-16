@@ -1,5 +1,14 @@
 # Changelog
 
+## 4.8.0 — 2026-11-16
+
+- Replace family-restricted role selectors with the full host model catalog, all-role model/effort selection, per-role editing, and one-step restoration of the existing recommended mix.
+- Share an atomic host-local Strataa profile across Router, Brain, Worker, Reviewer, Solo, prompt summary and Dashboard analysis. Snapshot each run; never silently substitute an unavailable model or unsupported explicit effort.
+- Pin native delegated tasks to the selected Worker or Reviewer, including explicit automatic effort. Keep reviewer sessions separate/read-only and distinguish same-model review from cross-model validation.
+- Preserve legacy session settings only when no shared profile exists, retain historical Flow identities, and replace `STRATAA_ANALYSIS_MODEL` with the shared analysis role.
+- Reject stale Dashboard model consent before inference and clear consent when the shared model or effort changes.
+- Verify all 191 cases across the initial suite and one corrected routing-fixture rerun, plus two focused consent checks. Exercise the actual OMP model picker, all-Astra profiles, recommended restore, and the Dashboard consent boundary without paid inference.
+
 ## 4.7.0 — 2026-11-16
 
 - Rename the product, package, commands and first-party skill to Strataa, `omp-agent-strataa`, `/strataa` and `strataa-dashboard`; move the public repository to `myunhh/Strataa`.

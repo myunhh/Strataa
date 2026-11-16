@@ -16,7 +16,7 @@ const match = version.match(/(\d+)\.(\d+)\.(\d+)/);
 if (!match || Number(match[1]) < 18 || (Number(match[1]) === 18 && Number(match[2]) < 15)) {
   throw new Error(`OMP >=18.15.0 is required; found ${version}`);
 }
-const files = ["package.json", "index.js", "controller.js", "protocol.js", "waves.js", "transport.js", "prompt-summary.js", "flow.js", "flow-view.js", "flow-store.js", "flow-watch.js", "live-hosts.js", "saved-flow.js", "aris-skills.js", "aris-runtime.js", "aris-provenance.json", "ARIS-LICENSE", "install.mjs", "README.md", "CHANGELOG.md"];
+const files = ["package.json", "index.js", "controller.js", "protocol.js", "model-config.js", "waves.js", "transport.js", "prompt-summary.js", "flow.js", "flow-view.js", "flow-store.js", "flow-watch.js", "live-hosts.js", "saved-flow.js", "aris-skills.js", "aris-runtime.js", "aris-provenance.json", "ARIS-LICENSE", "install.mjs", "README.md", "CHANGELOG.md"];
 for (const directory of ["agents", "test"]) {
   for (const name of (await readdir(path.join(source, directory))).sort()) {
     if (name.endsWith(directory === "agents" ? ".md" : ".test.js")) files.push(`${directory}/${name}`);
@@ -63,4 +63,4 @@ for (let index = 0; index < files.length; index++) {
 }
 console.log(`Shipped ${files.length} files including ${provenance.skills.length} ARIS skills from ${provenance.source.url}@${provenance.source.commit.slice(0, 12)}`);
 execFileSync(omp, ["plugin", "link", destination], { stdio: "inherit" });
-console.log(`Installed omp-agent-strataa@${manifest.version} for ${version}\n${destination}\nIn OMP: /reload-plugins, /strataa skills, then /strataa on (Fable Brain + Opus Worker + Astra reviewer)\nIn another OMP terminal: /strataa watch (read-only multi-session flow monitor)`);
+console.log(`Installed omp-agent-strataa@${manifest.version} for ${version}\n${destination}\nIn OMP: /reload-plugins, /strataa models, then /strataa on (recommended mix, all-role model or per-role selection)\nIn another OMP terminal: /strataa watch (read-only multi-session flow monitor)`);

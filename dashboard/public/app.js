@@ -146,7 +146,11 @@ async function loadState({ rebase }) {
   clearTimeout(pollTimer);
   $('#refresh-state').disabled = true;
   try {
-    state = await api('/api/state');
+    const next = await api('/api/state');
+    if (state?.capabilities.model !== next.capabilities.model || state?.capabilities.reasoning !== next.capabilities.reasoning) {
+      $('#analysis-consent').checked = false;
+    }
+    state = next;
     for (const key of ['papers', 'concepts', 'buildUps', 'skills', 'flows']) state[key] ||= [];
     if (rebase) for (const form of $$('form')) form.dataset.revision = state.revision;
     else for (const form of $$('form')) if (!dirtyForms.has(form.id)) form.dataset.revision = state.revision;
@@ -188,7 +192,7 @@ function render() {
   $('#stat-shared').textContent = state.concepts.filter(c => papersForConcept(c.id).length >= 2).length;
   const cap = state.capabilities || {};
   $('#import-limits').textContent = `파일당 최대 ${Math.round((cap.maxFileBytes || 20971520) / 1048576)} MiB · PDF 추출 ${cap.pdf ? '사용 가능' : '사용 불가: 텍스트/MD를 이용하세요'}`;
-  $('#analysis-disclosure').textContent = `분석을 실행하면 선택한 논문의 전체 원문과 기존 개념 목록이 외부 모델 ${cap.model || '설정된 OMP 모델'}에 전송됩니다. 기존 OMP 인증을 사용하며 사용 요금이 발생할 수 있습니다. 정확한 비용은 여기서 산정하지 않습니다. 전체 입력 한도 ${Number(cap.maxAnalysisChars || 180000).toLocaleString('ko-KR')}자. 자동 재시도 없음.`;
+  $('#analysis-disclosure').textContent = `다음 분석을 실행하면 선택한 논문의 전체 원문과 기존 개념 목록이 외부 모델 ${cap.model || '설정된 OMP 모델'} (추론: ${cap.reasoning || '미확인'})에 전송됩니다. 모델·추론 설정은 /strataa models에서 변경합니다. 기존 OMP 인증을 사용하며 사용 요금이 발생할 수 있습니다. 정확한 비용은 여기서 산정하지 않습니다. 전체 입력 한도 ${Number(cap.maxAnalysisChars || 180000).toLocaleString('ko-KR')}자. 자동 재시도 없음.`;
   syncOptions();
   syncCleanForms();
   renderPapers(); renderPaperDetail(); renderAnalysisStatus(); renderGraph(); renderConceptDetail(); renderBuildUps(); renderBuildUpDetail(); renderSkills(); renderFlows();
@@ -244,7 +248,8 @@ function renderAnalysisStatus() {
   $('#select-all-papers').indeterminate = visible.some(p => selectedPapers.has(p.id)) && !$('#select-all-papers').checked;
   $('#analyze-papers').disabled = analyzing || job.status === 'running' || !selectedPapers.size || !$('#analysis-consent').checked;
   $('#analyze-papers').textContent = job.status === 'running' ? '분석 진행 중…' : '선택 논문 분석하기';
-  $('#analysis-status').textContent = job.status === 'running' ? `${job.paperIds?.length || 0}편 분석 중 · 원문은 저장되어 있습니다. 완료까지 이 영역을 자동 갱신합니다.` : job.status === 'failed' ? `분석 실패: ${job.error || '알 수 없는 오류'}. 자동 재시도하지 않습니다.` : job.status === 'completed' ? `분석 완료${job.finishedAt ? ` · ${formatDate(job.finishedAt)}` : ''}. 자동 연결은 초안이며 직접 검토하세요.` : '아직 실행 중인 분석이 없습니다.';
+  const snapshot = job.model ? `${job.model} · 추론: ${job.reasoning || '미기록'} · ` : '';
+  $('#analysis-status').textContent = job.status === 'running' ? `${snapshot}${job.paperIds?.length || 0}편 분석 중 · 원문은 저장되어 있습니다. 완료까지 이 영역을 자동 갱신합니다.` : job.status === 'failed' ? `${snapshot}분석 실패: ${job.error || '알 수 없는 오류'}. 자동 재시도하지 않습니다.` : job.status === 'completed' ? `${snapshot}분석 완료${job.finishedAt ? ` · ${formatDate(job.finishedAt)}` : ''}. 자동 연결은 초안이며 직접 검토하세요.` : '아직 실행 중인 분석이 없습니다.';
   $('#analysis-status').classList.toggle('error-text', job.status === 'failed');
 }
 function selectPaper(id, saved = false) {
@@ -520,8 +525,9 @@ $('#analyze-papers').addEventListener('click', async () => {
   if (!state || analyzing || !selectedPapers.size || !$('#analysis-consent').checked || state.analysisJob?.status === 'running') return;
   analyzing = true; renderAnalysisStatus();
   try {
-    await mutate('/api/analyze', 'POST', { paperIds: [...selectedPapers] });
+    const { model, reasoning } = state.capabilities;
     $('#analysis-consent').checked = false;
+    await mutate('/api/analyze', 'POST', { paperIds: [...selectedPapers], model, reasoning });
     if (await refresh()) notify('분석 요청을 접수했습니다. 실제 완료 상태는 논문 목록 아래에 표시합니다.');
   }
   catch (error) { showError(error); } finally { analyzing = false; renderAnalysisStatus(); }

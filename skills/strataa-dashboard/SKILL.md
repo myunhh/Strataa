@@ -13,7 +13,7 @@ Dashboard 패키지 루트에서 `npm run dashboard`를 실행한다. 기본 주
 
 1. `GET /api/state`로 현재 논문·개념·BuildUp·revision·실제 skill·공개 flow를 읽는다. 사용자가 명시한 Dashboard 주소만 쓴다.
 2. 논문은 `POST /api/papers`로 `{revision,title,authors,year,sourceUrl,text,notes}`를 저장한다. 파일은 `file:{name,base64}`로 PDF/Markdown/UTF-8 text를 보낸다. URL은 출처이며 원문 자동 수집이 아니다.
-3. 사용자가 분석을 요청하면 `POST /api/analyze`에 `{revision,paperIds}`를 보낸다. 선택 원문과 개념이 표시된 모델 제공자에게 전송된다. 과금·공유 범위의 동의를 추정하지 않는다. 도구 없는 OMP 추론이며 기존 Strataa 연구 실행/독립 검토를 대체하지 않는다.
+3. 사용자가 분석을 요청하면 먼저 `GET /api/state`의 `capabilities.model`·`capabilities.reasoning`으로 실제 선택을 확인한 뒤 `POST /api/analyze`에 `{revision,paperIds,model,reasoning}`을 보낸다. 읽은 값과 실행 시 설정이 다르면 409로 거부하므로 새 설정에 대한 동의를 다시 확인한다. 모델과 추론 강도는 공유 `/strataa models`의 Dashboard 분석 역할로 설정한다. 서버 재시작 없이 다음 분석부터 적용되며 실행 중 작업은 시작 시점의 모델·추론 강도를 `analysisJob.model`·`analysisJob.reasoning`에 유지한다. 별도의 환경변수 모델 재정의는 없다. 선택 원문과 개념이 표시된 모델 제공자에게 전송된다. 과금·공유 범위의 동의를 추정하지 않는다. 도구 없는 OMP 추론이며 기존 Strataa 연구 실행/별도 검토를 대체하지 않는다. 같은 모델의 별도 검토 컨텍스트는 교차 모델 독립성을 뜻하지 않는다.
 4. 원문 인용과 상위 분야→문제→방법→기법 연결을 확인한다. 공통 이름만으로 논문들의 방법을 동등하다고 선언하지 않는다. 모델 연결은 draft이며 사용자 확인 전 accepted로 바꾸지 않는다.
 5. 선택이 생기면 BuildUp에 Context, Options, Decision, Evidence, Next를 기록한다. 가설·결정·관측을 구분하며, 증거가 없는 결과를 만들지 않는다.
 

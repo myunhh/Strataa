@@ -1,4 +1,5 @@
-import { ARIS_ROUTES, ROUTER } from "./protocol.js";
+import { ARIS_ROUTES } from "./protocol.js";
+import { DEFAULT_MODELS, normalizeModelConfig } from "./model-config.js";
 import { REVIEWER_AGENT, WORKER_AGENT, reviewOutput, reviewReference } from "./aris-runtime.js";
 import { unfinishedWaves } from "./waves.js";
 
@@ -6,12 +7,12 @@ export const FLOW = "agent-dialogue-flow";
 const INITIAL_NOTE = "공개 실행 기록 · /strataa flow 상세 · Esc 중단";
 const terminal = state => ["completed", "failed", "cancelled", "skipped", "interrupted"].includes(state);
 /**
- * Row roles: router (Terra) · solo (Astra alone) · brain (Fable: analysis, planning, synthesis, final answer)
- * · worker (Opus: bounded execution delegated by the brain) · reviewer (Astra: independent review round).
+ * Row roles: router · solo · brain (analysis, planning, synthesis, final answer)
+ * · worker (bounded delegated execution) · reviewer (separate-context read-only review).
  * Other native jobs keep their observed agent and carry no role.
  */
-const makeRow = (id, label, agent, model, role, parentId) =>
-  ({ id, label, agent, model, role, parentId, state: "pending", summary: "", jobIds: [], jobs: [] });
+const makeRow = (id, label, agent, model, role, parentId, reasoning) =>
+  ({ id, label, agent, model, role, parentId, ...(reasoning ? { reasoning } : {}), state: "pending", summary: "", jobIds: [], jobs: [] });
 
 /** Keep public text only; terminal controls and private/tool blocks never enter stored details. */
 export function publicText(content) {
@@ -35,26 +36,37 @@ function transition(row, state, at) {
   return true;
 }
 
-export function createFlow(id, request = "") {
+export function createFlow(id, request = "", config = DEFAULT_MODELS) {
   const at = Date.now();
-  const router = makeRow("router", "요청 분류", "Terra", `${ROUTER.model} · ${ROUTER.reasoning}`, "router");
+  const { router: spec } = normalizeModelConfig(config);
+  const router = makeRow("router", "요청 분류", "Router", spec.model, "router", undefined, spec.reasoning);
   transition(router, "running", at);
   return { version: 1, id, request: publicText(request), startedAt: at, updatedAt: at,
     route: "pending", status: "running", reason: "요청에 맞는 실행 경로를 선택합니다.",
     rows: [router], note: INITIAL_NOTE };
 }
 
-const modelBase = selector => String(selector ?? "").split("@")[0].split(":")[0].trim().toLowerCase();
+const modelIdentity = value => String(value ?? "").trim().toLowerCase();
+const matchesPinnedModel = (identity, pinned) => {
+  const expected = modelIdentity(pinned);
+  const observed = modelIdentity(identity);
+  if (!expected) return false;
+  if (observed === expected) return true;
+  // Task selectors can append an effort and host route. Preserve punctuation in
+  // the configured catalog ID itself (e.g. provider/model:free or model@version).
+  const withoutEffort = observed.replace(/:(?:auto|off|minimal|low|medium|high|xhigh|max)$/, "");
+  return withoutEffort === expected || withoutEffort.startsWith(`${expected}@`);
+};
 const reviewRows = flow => flow.rows.filter(row => row.review === true);
 const workerRows = flow => flow.rows.filter(row => row.worker === true);
 
 /**
- * solo: Astra performs the work. dialogue/research: Fable is the brain — it follows the loaded ARIS
- * skills, plans and writes the final answer; bounded execution it chooses to delegate runs as native
- * aris-worker jobs pinned to Opus, and every native aris-reviewer call becomes its own observed round
- * pinned to Astra. A worker is never required: planning/analysis requests finish without one.
+ * solo: the selected Solo performs the work. ARIS routes use the selected Brain;
+ * bounded delegated execution and read-only review use their configured models.
+ * A worker is never required: planning/analysis requests finish without one.
  */
-export function planFlow(flow, decision, config, options = {}) {
+export function planFlow(flow, decision, config = DEFAULT_MODELS, options = {}) {
+  const models = normalizeModelConfig(config);
   flow.route = decision.route;
   flow.reason = decision.reason;
   flow.waves = structuredClone(decision.waves);
@@ -62,12 +74,12 @@ export function planFlow(flow, decision, config, options = {}) {
   updateStage(flow, "router", "completed", decision.reason);
   if (ARIS_ROUTES.includes(decision.route)) {
     flow.skills = [...decision.skills];
-    flow.worker = { agent: WORKER_AGENT, model: config.opus };
-    flow.reviewer = { agent: REVIEWER_AGENT, model: config.astra };
+    flow.worker = { agent: WORKER_AGENT, ...models.worker };
+    flow.reviewer = { agent: REVIEWER_AGENT, ...models.reviewer };
     flow.reviewRequired = options.reviewRequired === true;
-    flow.rows.push(makeRow("final", `ARIS 분석·계획·답변 · ${flow.skills.join(", ")}`, "Fable", config.fable, "brain", "router"));
+    flow.rows.push(makeRow("final", `ARIS 분석·계획·답변 · ${flow.skills.join(", ")}`, "Brain", models.brain.model, "brain", "router", models.brain.reasoning));
   } else {
-    flow.rows.push(makeRow("final", "직접 작업·답변", "Astra", config.astra, "solo", "router"));
+    flow.rows.push(makeRow("final", "직접 작업·답변", "Solo", models.solo.model, "solo", "router", models.solo.reasoning));
   }
   flow.rows.find(row => row.id === "final").wave = 1;
 }
@@ -152,7 +164,7 @@ const resolvedIdentity = item => item.resolvedModelIdentity || item.resolvedMode
 
 function pinnedModelProblem(identity, pinned, who) {
   if (typeof identity !== "string" || !identity.trim()) return `${who} 모델 메타데이터가 없어 인정하지 않음`;
-  if (modelBase(identity) !== modelBase(pinned)) return `${who} 모델 불일치: ${publicSummary(identity)} ≠ ${pinned}`;
+  if (!matchesPinnedModel(identity, pinned)) return `${who} 모델 불일치: ${publicSummary(identity)} ≠ ${pinned}`;
   return undefined;
 }
 
@@ -160,7 +172,7 @@ const reviewModelProblem = (flow, item) => pinnedModelProblem(resolvedIdentity(i
 
 /**
  * Why a "completed" worker job is not worker execution: the resolved model must be explicit and
- * exactly the pinned Opus selector. The identity may come from the result itself or from an
+ * exactly the pinned Worker selector. The identity may come from the result itself or from an
  * earlier lifecycle snapshot of the same job; a job whose model was never observed is rejected
  * rather than silently counted as execution on some other model.
  */
@@ -170,7 +182,7 @@ export function workerProblem(flow, item, job) {
 
 /**
  * Why a "completed" reviewer job is not reviewer evidence: the resolved model must be explicit and
- * exactly the pinned Astra selector, and the public output must be nonempty. Silence never acquits.
+ * exactly the pinned Reviewer selector, and the public output must be nonempty. Silence never acquits.
  */
 export function reviewProblem(flow, item) {
   const modelProblem = reviewModelProblem(flow, item);
@@ -199,12 +211,12 @@ function correlate(flow, item) {
     return row;
   };
   if (flow.reviewer && item.agent === flow.reviewer.agent) {
-    const row = makeRow(`review:${item.id}`, `${REVIEWER_AGENT} 검토 작업 ${reviewRows(flow).length + 1}`, "Astra", flow.reviewer.model, "reviewer", parentId);
+    const row = makeRow(`review:${item.id}`, `${REVIEWER_AGENT} 검토 작업 ${reviewRows(flow).length + 1}`, "Reviewer", flow.reviewer.model, "reviewer", parentId, flow.reviewer.reasoning);
     row.review = true;
     return insert(row);
   }
   if (flow.worker && item.agent === flow.worker.agent) {
-    const row = makeRow(`worker:${item.id}`, `${WORKER_AGENT} 실행 ${workerRows(flow).length + 1}`, "Opus", flow.worker.model, "worker", parentId);
+    const row = makeRow(`worker:${item.id}`, `${WORKER_AGENT} 실행 ${workerRows(flow).length + 1}`, "Worker", flow.worker.model, "worker", parentId, flow.worker.reasoning);
     row.worker = true;
     return insert(row);
   }
@@ -306,7 +318,7 @@ export function reviewEvidence(flow) {
     required: flow.reviewRequired === true };
 }
 
-/** Worker execution state: delegated jobs and those completed on the pinned Opus model. Never required. */
+/** Worker execution state: delegated jobs and those completed on the pinned Worker model. Never required. */
 export function workerEvidence(flow) {
   const rows = workerRows(flow);
   return { jobs: rows.length, completed: rows.filter(row => row.state === "completed").length };
@@ -329,7 +341,7 @@ function endFlow(flow, status, note, at) {
       note ||= "선택한 스킬은 검토자 라운드가 필요하지만 aris-reviewer 완료가 관측되지 않았습니다.";
     } else if (unfinishedWaves(flow).length) {
       status = "incomplete";
-      note ||= `Terra Wave 실행·공개 결과 미완료: ${unfinishedWaves(flow).join(", ")}`;
+      note ||= `Router Wave 실행·공개 결과 미완료: ${unfinishedWaves(flow).join(", ")}`;
     }
     const final = flow.rows.find(row => row.id === "final");
     if (final && !terminal(final.state)) transition(final, "completed", at);
@@ -370,5 +382,5 @@ export function flowText(flow) {
   const labels = { pending: "분류 중", solo: "일반 작업", dialogue: "ARIS 검토", research: "ARIS 연구" };
   return [`Agent Flow · ${labels[flow.route]} · ${flow.status}`, flow.reason, flow.skills?.length ? `skills: ${flow.skills.join(", ")}` : "",
     ...(flow.waves ?? []).map((stage, index) => `Wave ${stage.wave ?? index + 2} · ${stage.title} · ${stage.goal}${stage.dependsOn ? ` · 선행: ${stage.dependsOn.join(", ") || "없음"}` : ""}`),
-    ...flow.rows.map(row => `${row.parentId ? "  └ " : ""}${Number.isInteger(row.wave) ? `W${row.wave} ` : ""}[${row.state}] ${row.label} — ${row.agent}${row.role ? ` (${row.role})` : ""} · ${row.model}${row.summary ? `\n  ${row.summary}` : ""}${row.jobIds.length ? ` · ${row.jobIds.join(", ")}` : ""}`), flow.note].filter(Boolean);
+    ...flow.rows.map(row => `${row.parentId ? "  └ " : ""}${Number.isInteger(row.wave) ? `W${row.wave} ` : ""}[${row.state}] ${row.label} — ${row.agent}${row.role ? ` (${row.role})` : ""} · ${row.model}${row.reasoning && !row.model.includes(" · ") ? ` · ${row.reasoning}` : ""}${row.summary ? `\n  ${row.summary}` : ""}${row.jobIds.length ? ` · ${row.jobIds.join(", ")}` : ""}`), flow.note].filter(Boolean);
 }

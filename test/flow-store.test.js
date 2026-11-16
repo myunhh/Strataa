@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { createFlow, finishFlow, planFlow, startExecution } from "../flow.js";
-import { DEFAULTS } from "../protocol.js";
+import { DEFAULT_MODELS } from "../model-config.js";
 import { createFlowPublisher, flowDirectory, readFlowSessions } from "../flow-store.js";
 
 function temporary(t) {
@@ -50,7 +50,7 @@ test("two publishers retain completed snapshots and replace only their own sourc
     assert.equal(statSync(path.join(directory, file)).mode & 0o777, 0o600);
     assert.equal(JSON.parse(readFileSync(path.join(directory, file), "utf8")).version, 1);
   }
-  planFlow(flow, { route: "solo", reason: "Direct request", waves: [] }, DEFAULTS);
+  planFlow(flow, { route: "solo", reason: "Direct request", waves: [] }, DEFAULT_MODELS);
   startExecution(flow);
   finishFlow(flow, "completed");
   first.publish(info("first", flow));

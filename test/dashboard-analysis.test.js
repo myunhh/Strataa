@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
-import { analyzePapers, buildAnalysisPrompt, DEFAULT_MODEL, MAX_ANALYSIS_CHARS, validateAnalysis } from "../dashboard/analysis.js";
+import { analyzePapers, buildAnalysisPrompt, MAX_ANALYSIS_CHARS, validateAnalysis } from "../dashboard/analysis.js";
+import { DEFAULT_MODELS } from "../model-config.js";
 
 const source = "Robotics studies motion. Planning avoids collisions. Search constructs a path. A heuristic prioritizes nodes.";
 const papers = [{ id: "paper_one", title: "Planning", text: source }];
@@ -23,7 +24,8 @@ function result() {
 }
 
 function assistant(value = result(), overrides = {}) {
-  return { role: "assistant", provider: "openai-codex", model: "gpt-6-astra", stopReason: "stop", content: [{ type: "thinking", thinking: "This is not the final JSON." }, { type: "text", text: JSON.stringify(value) }], ...overrides };
+  const [provider, model] = DEFAULT_MODELS.analysis.model.split("/");
+  return { role: "assistant", provider, model, stopReason: "stop", content: [{ type: "thinking", thinking: "This is not the final JSON." }, { type: "text", text: JSON.stringify(value) }], ...overrides };
 }
 function events(message = assistant()) {
   return [
@@ -54,7 +56,7 @@ async function withCli(program, run) {
   }
 }
 
-const analyze = extra => analyzePapers({ papers, concepts: [], ...extra });
+const analyze = extra => analyzePapers({ papers, concepts: [], ...DEFAULT_MODELS.analysis, ...extra });
 
 test("normalization creates drafts, preserves accepted metadata and exact whitespace-tolerant quotes", () => {
   const value = result();
@@ -173,19 +175,48 @@ process.stdin.on('end', () => {
 });`;
   await withCli(program, async directory => {
     const normalized = await analyze();
-    assert.equal(normalized.model, DEFAULT_MODEL);
+    assert.equal(normalized.model, DEFAULT_MODELS.analysis.model);
+    assert.equal(normalized.reasoning, DEFAULT_MODELS.analysis.reasoning);
     assert.equal(normalized.papers[0].summary, "Path planning research.");
     assert.equal(normalized.concepts[0].review, "draft");
     const capture = JSON.parse(await readFile(path.join(directory, "capture.json"), "utf8"));
     assert.ok(capture.input.includes(source));
     assert.equal(capture.args.some(argument => argument.includes(source)), false);
     for (const flag of ["--print", "--no-tools", "--no-extensions", "--no-skills", "--no-rules", "--no-context-files", "--no-session", "--no-title", "--no-lsp", "--no-prewalk"]) assert.ok(capture.args.includes(flag), flag);
-    for (const [flag, expected] of [["--mode", "json"], ["--model", DEFAULT_MODEL], ["--thinking", "high"], ["--max-time", "180"]]) assert.equal(capture.args[capture.args.indexOf(flag) + 1], expected);
+    for (const [flag, expected] of [["--mode", "json"], ["--model", DEFAULT_MODELS.analysis.model], ["--thinking", DEFAULT_MODELS.analysis.reasoning], ["--max-time", "180"]]) assert.equal(capture.args[capture.args.indexOf(flag) + 1], expected);
     assert.match(capture.config, /retry:\n  enabled: false/);
     assert.match(capture.config, /contextPromotion:\n  enabled: false/);
     assert.match(capture.config, /advisor:\n  enabled: false/);
     assert.match(capture.config, /compaction:\n  enabled: false/);
     await assert.rejects(readFile(capture.configPath), { code: "ENOENT" });
+  });
+});
+
+test("runner passes non-default reasoning and auto unchanged to the child CLI without changing model", async () => {
+  const model = "research-provider/unrestricted-model";
+  const program = `
+const fs = require('node:fs');
+const path = require('node:path');
+process.stdin.resume();
+process.stdin.on('end', () => {
+  fs.writeFileSync(path.join(path.dirname(process.argv[1]), 'args.json'), JSON.stringify(process.argv.slice(2)));
+  ${emit(events(assistant(result(), { provider: "research-provider", model: "unrestricted-model" })))}
+});`;
+  for (const reasoning of ["low", "auto"]) {
+    await withCli(program, async directory => {
+      const normalized = await analyze({ model, reasoning });
+      const args = JSON.parse(await readFile(path.join(directory, "args.json"), "utf8"));
+      assert.equal(args[args.indexOf("--model") + 1], model);
+      assert.equal(args[args.indexOf("--thinking") + 1], reasoning);
+      assert.equal(normalized.model, model);
+      assert.equal(normalized.reasoning, reasoning);
+    });
+  }
+});
+
+test("runner rejects invalid reasoning before launching a child", async () => {
+  await withCli("throw new Error('must not launch');", async () => {
+    await assert.rejects(analyze({ reasoning: "unrecognized" }), /reasoning must be/);
   });
 });
 

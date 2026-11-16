@@ -1,6 +1,6 @@
 {
   "name": "omp-agent-strataa",
-  "version": "4.7.0",
+  "version": "4.8.0",
   "private": true,
   "description": "Strataa research dashboard and ARIS-based OMP harness with shared concepts, versioned BuildUp and dependency-aware Waves",
   "homepage": "https://github.com/myunhh/Strataa",

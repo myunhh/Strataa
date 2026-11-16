@@ -4,7 +4,7 @@ import { runModelTurn } from "./transport.js";
 import { createFlowView } from "./flow-view.js";
 import { createFlowPublisher } from "./flow-store.js";
 import { createFlowWatch } from "./flow-watch.js";
-import { generatePromptSummary, PROMPT_SUMMARY_MODEL } from "./prompt-summary.js";
+import { generatePromptSummary } from "./prompt-summary.js";
 import { getArisCatalog, loadArisSkills, validateArisInstall } from "./aris-skills.js";
 
 const AGENT_ID = /^[A-Za-z0-9][A-Za-z0-9_.-]*$/;
@@ -32,7 +32,6 @@ export default function agentStrataa(pi) {
   registerStrataa(pi, runModelTurn, createFlowView, { getArisCatalog, loadArisSkills, validateArisInstall }, readAgentOutput, {
     publisher: createFlowPublisher(),
     createWatch: createFlowWatch,
-    summaryModel: PROMPT_SUMMARY_MODEL,
     summarizePrompt: (ctx, options) => generatePromptSummary({ ...options, runTurn: turn => runModelTurn(ctx, turn) }),
   });
 }

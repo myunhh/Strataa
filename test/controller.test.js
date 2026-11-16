@@ -7,6 +7,8 @@ import { createFlowPublisher, readFlowSessions } from "../flow-store.js";
 import { registerStrataa } from "../controller.js";
 import { FLOW } from "../flow.js";
 import { REVIEWER_AGENT, WORKER_AGENT } from "../aris-runtime.js";
+import { DEFAULT_MODELS, MODEL_ROLES, normalizeModelConfig, uniformModelConfig } from "../model-config.js";
+import { generatePromptSummary } from "../prompt-summary.js";
 
 const ROOT = "/opt/aris";
 const SKILLS = {
@@ -28,7 +30,7 @@ function skillsModule(overrides = {}) {
 }
 
 function harness(runTurn, entries = [], skills = skillsModule(), readAgentOutput = undefined,
-  createFlowView = () => ({ render: () => [], invalidate() {} }), identity = { kind: "main", id: "Main" }, monitor = undefined) {
+  createFlowView = () => ({ render: () => [], invalidate() {} }), identity = { kind: "main", id: "Main" }, monitor = undefined, settings = undefined) {
   const handlers = new Map();
   const bus = new Map();
   let liveFlow;
@@ -44,6 +46,11 @@ function harness(runTurn, entries = [], skills = skillsModule(), readAgentOutput
   let idle = true;
   let key;
   let command;
+  let savedModels;
+  const modelSettings = settings ?? {
+    read: ({ fallback = DEFAULT_MODELS } = {}) => savedModels ?? normalizeModelConfig(fallback),
+    write: models => (savedModels = normalizeModelConfig(models)),
+  };
   const models = [
     { provider: "anthropic", id: "claude-sonnet-4-6", family: "anthropic" },
     { provider: "openai-codex", id: "gpt-6-astra", family: "openai", reasoning: true, thinking: { efforts: ["low", "high", "xhigh", "max"] } },
@@ -96,10 +103,10 @@ function harness(runTurn, entries = [], skills = skillsModule(), readAgentOutput
     },
   };
   registerStrataa(pi, (_ctx, args) => { calls.push(args); return runTurn(args); },
-    (getFlow, ...args) => { liveFlow = getFlow; return createFlowView(getFlow, ...args); }, skills, readAgentOutput, monitor);
+    (getFlow, ...args) => { liveFlow = getFlow; return createFlowView(getFlow, ...args); }, skills, readAgentOutput, monitor, modelSettings);
   handlers.get("session_start")({}, ctx);
   return {
-    ctx, pi, entries, cards, prompts, promptModels, promptEfforts, notices, models, calls, skills,
+    ctx, pi, entries, cards, prompts, promptModels, promptEfforts, notices, models, calls, skills, modelSettings,
     command: args => command(args, ctx),
     flow: () => liveFlow?.(),
     input: (text, extra = {}) => handlers.get("input")({ text, source: "interactive", ...extra }, ctx),
@@ -131,7 +138,7 @@ function heldTurn() {
   let signal;
   return {
     run: args => { signal = args.signal; return new Promise(resolve => { release = resolve; }); },
-    release: () => release({ text: '{"route":"solo","reason":"late"}', stopReason: "stop" }),
+    release: () => release({ text: '{"route":"solo","reason":"late","waves":[]}', stopReason: "stop" }),
     get signal() { return signal; },
   };
 }
@@ -207,9 +214,9 @@ test("session switch invalidates in-flight work even when transport finishes suc
 test("ARIS starts Fable as Brain while retaining separate native worker and reviewer identities", async () => {
   const h = await startedReview();
   assert.deepEqual(h.promptEfforts, ["high"]);
-  assert.equal(h.handoff().details.speaker, "fable");
-  assert.deepEqual(h.handoff().details.worker, { agent: WORKER_AGENT, model: "anthropic/claude-opus-5-5" });
-  assert.deepEqual(h.handoff().details.reviewer, { agent: REVIEWER_AGENT, model: ASTRA });
+  assert.equal(h.handoff().details.speaker, "brain");
+  assert.deepEqual(h.handoff().details.worker, { agent: WORKER_AGENT, ...DEFAULT_MODELS.worker });
+  assert.deepEqual(h.handoff().details.reviewer, { agent: REVIEWER_AGENT, ...DEFAULT_MODELS.reviewer });
   assert.equal(latestFlow(h).rows.find(row => row.id === "final").state, "running");
   assert.deepEqual(h.context().map(card => card.details.phase), ["handoff"]);
   assert.equal(h.input("programmatic", { source: "extension" }), undefined);
@@ -386,32 +393,44 @@ function addAlternativeModels(h) {
   );
 }
 
-test("role pickers atomically commit three models and restrict each lineage", async () => {
+test("Models offers the entire catalog and applies one model and effort to every role", async () => {
   const h = harness(review);
   addAlternativeModels(h);
-  const choices = ["anthropic-api/claude-fable-5-2", "anthropic-api/claude-opus-4-6", "openai/gpt-6-astra"];
   let step = 0;
   h.ctx.ui.select = async (_title, options) => {
-    const offered = options.map(option => option.label);
-    if (step === 0) assert.deepEqual(new Set(offered), new Set(["anthropic/claude-fable-5-2", "anthropic-api/claude-fable-5-2"]));
-    if (step === 1) assert.deepEqual(new Set(offered), new Set(["anthropic/claude-opus-5-5", "anthropic-api/claude-opus-4-6"]));
-    if (step === 2) assert.deepEqual(new Set(offered), new Set([ASTRA, "openai/gpt-6-astra"]));
-    assert.ok(offered.includes(choices[step]));
-    return choices[step++];
+    if (step++ === 0) return "전체 역할에 같은 모델";
+    if (step === 2) {
+      assert.deepEqual(new Set(options.map(option => option.label)), new Set(h.models.map(model => `${model.provider}/${model.id}`)));
+      return ASTRA;
+    }
+    return "high";
   };
   await h.command("models");
-  assert.deepEqual(selectedState(h), { version: 4, enabled: false, fable: choices[0], opus: choices[1], astra: choices[2] });
+  assert.deepEqual(selectedState(h), { version: 5, enabled: false, models: uniformModelConfig(ASTRA, "high") });
+  const resumed = harness(review, [], skillsModule(), undefined, undefined, undefined, undefined, h.modelSettings);
+  await resumed.command("on");
+  resumed.input("Review with the selected profile");
+  await resumed.flush();
+  assert.equal(resumed.calls[0].model, ASTRA);
+  assert.equal(resumed.calls[0].reasoning, "high");
+  assert.deepEqual(resumed.promptModels, [ASTRA]);
+  assert.deepEqual(resumed.promptEfforts, ["high"]);
+  assert.deepEqual(resumed.event("before_subagent_spawn", { invocationKind: "task", agent: WORKER_AGENT }), { model: `${ASTRA}:high` });
+  assert.deepEqual(resumed.event("before_subagent_spawn", { invocationKind: "task", agent: REVIEWER_AGENT }), { model: `${ASTRA}:high` });
+  assert.deepEqual(resumed.event("before_subagent_spawn", { invocationKind: "task", agent: "scout" }), { model: `${ASTRA}:high` });
+  await resumed.command("off");
+  await resumed.event("session_shutdown");
 });
 
-test("cancelling the last picker preserves every prior role and the enabled state", async () => {
+test("cancelling effort selection leaves all saved roles and enabled state unchanged", async () => {
   const h = harness(review);
-  addAlternativeModels(h);
   await h.command("on");
   const before = [...h.entries];
   let step = 0;
-  h.ctx.ui.select = async () => ["anthropic-api/claude-fable-5-2", "anthropic-api/claude-opus-4-6", undefined][step++];
+  h.ctx.ui.select = async () => ["전체 역할에 같은 모델", ASTRA, undefined][step++];
   await h.command("models");
   assert.deepEqual(h.entries, before);
+  assert.deepEqual(h.modelSettings.read(), DEFAULT_MODELS);
 });
 
 test("late picker answer cannot overwrite a different session or newer explicit selection", async () => {
@@ -421,13 +440,13 @@ test("late picker answer cannot overwrite a different session or newer explicit 
     await h.command("on");
     let answer;
     h.ctx.ui.select = () => new Promise(resolve => { answer = resolve; });
-    const selection = h.command("astra");
+    const selection = h.command("reviewer");
     if (change === "session") {
       await h.event("session_before_switch");
       h.changeSession("new-session");
       h.event("session_switch");
     } else {
-      await h.command(`astra ${ASTRA}`);
+      await h.command(`reviewer ${ASTRA} high`);
     }
     const before = [...h.entries];
     answer("openai/gpt-6-astra");
@@ -436,20 +455,21 @@ test("late picker answer cannot overwrite a different session or newer explicit 
   }
 });
 
-test("unoffered replies or disappearance of a chosen model cannot partially commit roles", async () => {
-  for (const failure of ["wrong-family", "removed"]) {
+test("unoffered choices or model disappearance cannot partially save a selection", async () => {
+  for (const failure of ["unlisted", "removed"]) {
     const h = harness(review);
-    addAlternativeModels(h);
     await h.command("on");
     const before = [...h.entries];
     let step = 0;
     h.ctx.ui.select = async () => {
-      if (failure === "wrong-family") return "anthropic/claude-sonnet-4-6";
-      if (step === 2) h.models.splice(h.models.findIndex(model => model.provider === "anthropic-api" && model.id.startsWith("claude-fable")), 1);
-      return ["anthropic-api/claude-fable-5-2", "anthropic/claude-opus-5-5", ASTRA][step++];
+      if (failure === "unlisted") return "unlisted/model";
+      if (step++ === 0) return ASTRA;
+      h.models.splice(h.models.findIndex(model => model.id === "gpt-6-astra"), 1);
+      return "high";
     };
-    await h.command("models");
+    await h.command("brain");
     assert.deepEqual(h.entries, before);
+    assert.deepEqual(h.modelSettings.read(), DEFAULT_MODELS);
   }
 });
 
@@ -462,15 +482,15 @@ test("version-two sessions retain Astra/Opus choices while removing obsolete rev
   addAlternativeModels(h);
   await h.command("on");
   const restored = selectedState(h);
-  assert.equal(restored.version, 4);
-  assert.equal(restored.astra, "openai/gpt-6-astra");
-  assert.equal(restored.opus, "anthropic-api/claude-opus-4-6");
+  assert.equal(restored.version, 5);
+  assert.equal(restored.models.reviewer.model, "openai/gpt-6-astra");
+  assert.equal(restored.models.worker.model, "anthropic-api/claude-opus-4-6");
   assert.equal("gpt" in restored || "claude" in restored, false);
   h.input("review this idea");
   await h.flush();
   assert.deepEqual(h.promptModels, ["anthropic/claude-fable-5-2"]);
-  assert.deepEqual(h.handoff().details.reviewer, { agent: REVIEWER_AGENT, model: "openai/gpt-6-astra" });
-  assert.deepEqual(h.handoff().details.worker, { agent: WORKER_AGENT, model: "anthropic-api/claude-opus-4-6" });
+  assert.deepEqual(h.handoff().details.reviewer, { agent: REVIEWER_AGENT, model: "openai/gpt-6-astra", reasoning: "max" });
+  assert.deepEqual(h.handoff().details.worker, { agent: WORKER_AGENT, model: "anthropic-api/claude-opus-4-6", reasoning: "medium" });
 });
 
 test("legacy built-in Opus selections upgrade once; explicit v4 selections survive restart", async () => {
@@ -480,8 +500,8 @@ test("legacy built-in Opus selections upgrade once; explicit v4 selections survi
       data: { version, enabled: true, astra: ASTRA, opus, ...(version === 4 ? { fable: "anthropic-api/claude-fable-5-2" } : {}) } }]);
     addAlternativeModels(h);
     await h.command("on");
-    assert.equal(selectedState(h).opus, version === 3 ? "anthropic/claude-opus-5-5" : opus);
-    assert.equal(selectedState(h).fable, version === 3 ? "anthropic/claude-fable-5-2" : "anthropic-api/claude-fable-5-2");
+    assert.equal(selectedState(h).models.worker.model, version === 3 ? "anthropic/claude-opus-5-5" : opus);
+    assert.equal(selectedState(h).models.brain.model, version === 3 ? "anthropic/claude-fable-5-2" : "anthropic-api/claude-fable-5-2");
   }
 });
 
@@ -531,13 +551,13 @@ test("reviewer rounds are pinned to Astra, carry prior public rounds, and count 
   assert.equal(h.event("tool_call", { toolName: "task", toolCallId: "legacy", input: { agent: "rh-critic-method", task: "audit" } }).block, true);
   assert.equal(h.event("tool_call", { toolName: "task", toolCallId: "legacy2", input: { tasks: [{ agent: "dialogue-review", task: "x" }], context: "c" } }).block, true);
   assert.deepEqual(h.event("before_subagent_spawn", { invocationKind: "task", agent: "rh-thinker", spawnKey: "x" }).block, true);
-  assert.equal(h.event("before_subagent_spawn", { invocationKind: "task", agent: "scout", spawnKey: "s" }), undefined);
+  assert.deepEqual(h.event("before_subagent_spawn", { invocationKind: "task", agent: "scout", spawnKey: "s" }), { model: "anthropic/claude-opus-5-5:medium" });
   assert.deepEqual(h.event("before_subagent_spawn", { invocationKind: "task", agent: REVIEWER_AGENT, spawnKey: "Round1" }), { model: `${ASTRA}:max` });
 
   const first = h.event("tool_call", { toolName: "task", toolCallId: "r1", input: {
     name: "Round1", agent: REVIEWER_AGENT, model: "anthropic/claude-sonnet-4-6", tools: ["bash"], task: "Read /workspace/RESEARCH_REVIEW_REQUEST.md and review.",
   } });
-  assert.equal(first.input.model, undefined);
+  assert.equal(first.input.model, `${ASTRA}:max`);
   assert.equal(first.input.tools, undefined);
   assert.doesNotMatch(first.input.task, /이전 검토 라운드/);
   h.event("tool_execution_start", { toolCallId: "r1", toolName: "task", args: first.input });
@@ -1266,7 +1286,6 @@ test("watcher input and close never cancel its producer; navigation disposes onl
 test("a slow prompt summary survives execution completion but cannot overwrite the next request", async () => {
   const pending = [];
   const h = monitored(solo, {
-    summaryModel: "openai-codex/gpt-6-luna",
     summarizePrompt: (_ctx, options) => {
       const result = deferred();
       pending.push({ ...result, options });
@@ -1276,7 +1295,7 @@ test("a slow prompt summary survives execution completion but cannot overwrite t
   await h.command("on");
   h.input("First original prompt", { images: [{ type: "image", data: "not-for-summary" }] });
   assert.equal(pending.length, 1);
-  assert.deepEqual(Object.keys(pending[0].options).sort(), ["imageCount", "signal", "text"]);
+  assert.deepEqual(Object.keys(pending[0].options).sort(), ["config", "imageCount", "signal", "text"]);
   assert.equal(pending[0].options.text, "First original prompt");
   assert.equal(pending[0].options.imageCount, 1);
   await h.flush();
@@ -1309,7 +1328,6 @@ test("a slow prompt summary survives execution completion but cannot overwrite t
 test("prompt summary failures remain visible without failing routing and navigation invalidates late summaries", async () => {
   const pending = deferred();
   const h = monitored(solo, {
-    summaryModel: "openai-codex/gpt-6-luna",
     summarizePrompt: async () => { throw new Error("Luna unavailable"); },
   });
   await h.command("on");
@@ -1320,7 +1338,7 @@ test("prompt summary failures remain visible without failing routing and navigat
   assert.equal(latestFlow(h).promptSummary.error, "Luna unavailable");
   await h.event("session_shutdown");
   const navigated = monitored(solo, {
-    summaryModel: "openai-codex/gpt-6-luna", summarizePrompt: () => pending.promise,
+    summarizePrompt: () => pending.promise,
   });
   await navigated.command("on");
   navigated.input("Do not relabel this summary after navigation");
@@ -1340,7 +1358,6 @@ test("restoring an unfinished prompt summary reports unavailable without another
   const pending = deferred();
   let summaries = 0;
   const monitor = {
-    summaryModel: "openai-codex/gpt-6-luna",
     summarizePrompt: () => { summaries++; return pending.promise; },
   };
   const source = monitored(solo, monitor);
@@ -1357,4 +1374,57 @@ test("restoring an unfinished prompt summary reports unavailable without another
   await source.event("session_shutdown");
   pending.resolve({ model: "openai-codex/gpt-6-luna", text: "Late summary" });
   await Promise.resolve();
+});
+
+test("role-specific selection crosses model families and recommended restore replaces the entire profile", async () => {
+  const h = harness(review);
+  await h.command("models all anthropic/claude-sonnet-4-6");
+  await h.command(`brain ${ASTRA} high`);
+  const selected = h.modelSettings.read();
+  assert.deepEqual(selected.brain, { model: ASTRA, reasoning: "high" });
+  for (const role of MODEL_ROLES.filter(role => role !== "brain")) {
+    assert.deepEqual(selected[role], { model: "anthropic/claude-sonnet-4-6", reasoning: "auto" });
+  }
+  await h.command("on");
+  h.input("Review with a non-reasoning reviewer");
+  await h.flush();
+  const spawn = h.event("before_subagent_spawn", { invocationKind: "task", agent: REVIEWER_AGENT, spawnKey: "Review__One" });
+  assert.deepEqual(spawn, { model: "anthropic/claude-sonnet-4-6:auto" });
+  await h.command("models default");
+  assert.deepEqual(h.modelSettings.read(), DEFAULT_MODELS);
+  assert.deepEqual(h.event("before_subagent_spawn", { invocationKind: "task", agent: REVIEWER_AGENT, spawnKey: "Review__Two" }), spawn,
+    "restoring the default profile must not change an active run");
+});
+
+test("external profile changes affect the next request, not the current Router, executor or summary", async () => {
+  const hold = heldTurn();
+  let turns = 0;
+  const summaries = [];
+  const h = harness(args => ++turns === 1 ? hold.run(args) : solo(args), [], skillsModule(), undefined, undefined, undefined, {
+    summarizePrompt: (_ctx, options) => generatePromptSummary({ ...options, runTurn: async args => {
+      summaries.push(args);
+      return { text: "Summary", stopReason: "stop" };
+    } }),
+  });
+  await h.command(`models all ${ASTRA} high`);
+  await h.command("on");
+  h.input("First request");
+  const routing = h.flush();
+  h.modelSettings.write(uniformModelConfig("anthropic/claude-sonnet-4-6", "auto"));
+  hold.release();
+  await routing;
+  assert.equal(h.calls[0].model, ASTRA);
+  assert.deepEqual(h.promptModels, [ASTRA]);
+  assert.deepEqual(h.promptEfforts, ["high"]);
+  assert.equal(summaries[0].model, ASTRA);
+  assert.equal(summaries[0].reasoning, "high");
+  h.event("agent_end", { messages: [{ role: "assistant", stopReason: "stop" }] });
+  h.setIdle(true);
+  h.input("Next request");
+  await h.flush();
+  assert.equal(h.calls[1].model, "anthropic/claude-sonnet-4-6");
+  assert.equal(h.promptModels[1], "anthropic/claude-sonnet-4-6");
+  assert.equal(h.promptEfforts[1], "auto");
+  assert.equal(summaries[1].model, "anthropic/claude-sonnet-4-6");
+  assert.equal(summaries[1].reasoning, "auto");
 });

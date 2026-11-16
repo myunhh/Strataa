@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { collectContext, normalizeConfig, parseRoute, routeRequest, DEFAULT_REVIEW_SKILL, StrataaAbortError, StrataaConfigError } from "../protocol.js";
+import { collectContext, parseRoute, routeRequest, DEFAULT_REVIEW_SKILL, StrataaAbortError } from "../protocol.js";
+import { uniformModelConfig } from "../model-config.js";
 
 const response = text => ({ text, stopReason: "stop" });
 const catalog = [
@@ -11,12 +12,16 @@ const catalog = [
 	{ name: "paper-write", description: "Write a paper." },
 ];
 
-test("role selectors are validated and unknown keys are dropped", () => {
-	for (const role of ["fable", "astra", "opus"]) {
-		assert.throws(() => normalizeConfig({ [role]: "no-provider" }), StrataaConfigError);
-	}
-	assert.deepEqual(normalizeConfig({ fable: "anthropic/claude-fable-5-2", astra: "openai/gpt-c-astra", opus: "anthropic/claude-opus-5-5", claude: "x" }),
-		{ fable: "anthropic/claude-fable-5-2", astra: "openai/gpt-c-astra", opus: "anthropic/claude-opus-5-5" });
+test("configured arbitrary Router model and effort are used without changing route semantics", async () => {
+	const config = uniformModelConfig("another-provider/custom-model", "auto");
+	let call;
+	const decision = await routeRequest({ prompt: "request", catalog, config, runTurn: async args => {
+		call = args;
+		return response(JSON.stringify({ route: "solo", reason: "Direct", waves: [] }));
+	} });
+	assert.equal(call.model, config.router.model);
+	assert.equal(call.reasoning, "auto");
+	assert.equal(decision.route, "solo");
 });
 
 test("router accepts only explicit decisions; invalid responses never become a default route", async () => {
