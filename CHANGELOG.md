@@ -1,8 +1,12 @@
 # Changelog
 
-## Unreleased
+## 4.10.0 — 2026-11-16
 
 - Accept Windows Explorer WSL UNC paths (`wsl.localhost` and `wsl$`) for the server's current distribution, including quoted paths. Reject other distributions and unsupported Windows shares instead of treating them as relative Linux paths. Explain when a valid project directory still needs `.strataa/project.json`.
+- Adopt all 58 pstack skills and both agent definitions from cursor/plugins commit `bf0c7cd80abdbf7fe47b634978a7d1b4071f71a7` (v0.15.42), preserving all 560 original files, helper modes and Lauren Tan's MIT license.
+- Add native OMP entrypoints and an explicit host adapter. Preserve configured models, parent-owned delegation and user permission boundaries instead of importing Cursor model fallback, global configuration writes or automatic publication.
+- Apply pstack engineering guidance to Solo and expose `/strataa pstack` with pinned-source integrity checks. Keep ARIS research routing and its original 87-skill pack separate.
+- Make `strataa-project` CLI-first and add a read-only project summary/validation command using the existing source/quote/schema validator. Keep Dashboard optional and stopped; retain existing research records and databases.
 
 ## 4.9.0 — 2026-11-16
 

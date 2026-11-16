@@ -208,6 +208,12 @@ function empty(id, root) {
 }
 const projectId = root => createHash("sha256").update(root).digest("hex");
 
+// Read-only entrypoint: share the snapshot validator without connection storage or cache.
+export async function inspectProject(input = process.cwd()) {
+  const root = path.resolve(projectPath(input));
+  return snapshot(projectId(root), root);
+}
+
 export function createProjectRegistry(directory) {
   const storage = path.resolve(directory);
   const filename = "project-connections.json";

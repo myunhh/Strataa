@@ -5,7 +5,7 @@ description: "Connect an ordinary or Strataa project to evidence-grounded Top-do
 
 # Strataa Project
 
-First-party Strataa skill; independent of vendored ARIS. Works in existing software, research and mixed projects without Strataa commands, a new project template or global agent configuration. The working agent reads and interprets project material once and writes a local manifest. Dashboard only validates, reconciles and displays that manifest; it does not run a second model analysis. A human connects a project directory, not individual papers.
+First-party Strataa skill; independent of vendored ARIS. CLI-first: no browser, Dashboard, server, connection registry, or new project template is required. The working agent reads targeted project evidence and maintains a local manifest only on requested write tasks. The packaged CLI validates existing records without model analysis, record mutation or project registration.
 
 ## Invoke and scope
 
@@ -13,7 +13,20 @@ Use when asked to connect/index a project, recover its research or engineering h
 
 > Use strataa-project in this project. Read its existing documentation, relevant code and available logs, then create or incrementally update .strataa/project.json with grounded Top-down links, BuildUp history, a project summary and the next action. Distinguish observed facts, inferences and unknowns. Do not run experiments or invent decisions.
 
-Resolve the intended project root from the user's request and current workspace. Do not index the whole home directory or guess another project. Inspect an existing `.strataa/project.json` before writing; preserve its IDs, records and unrelated edits. If it is malformed, report the concrete issue and repair only what the actual sources support; never silently replace it with an empty manifest.
+Resolve the intended project root from the user's request and current workspace. Do not index the whole home directory or guess another project. First run the read-only helper below, then read only the evidence relevant to the question and reported gaps. Preserve existing IDs, records and unrelated edits. If the manifest is malformed, report the concrete issue and repair only on a requested write task, using actual sources; never silently replace it with an empty manifest.
+
+### CLI inspection first
+
+Resolve `PLUGIN_ROOT` from the host's actual loaded Strataa plugin location (the bundled `skills/strataa-project/SKILL.md` is two directories below it). Use its absolute, resolved package root containing `project-cli.mjs`; do not guess a development checkout, assume the project contains the plugin, or use a stale copied skill's directory as the package root. Resolve `PROJECT_ROOT` from the current workspace or explicit user request. Run:
+
+```sh
+node "$PLUGIN_ROOT/project-cli.mjs" "$PROJECT_ROOT"
+node "$PLUGIN_ROOT/project-cli.mjs" "$PROJECT_ROOT" --json
+```
+
+The positional root defaults to the command's working directory. Linux paths, `~`, and same-distribution WSL UNC paths use the existing project path normalization. JSON returns the full validated snapshot (including hierarchy, history and diagnostics), not a new manifest schema. Invalid/missing records exit nonzero. Read-only inspection never creates files, starts services, records approval, executes experiments or persists a registry connection. Successful validation means structure, references and source-quote containment are valid; it does not prove the reported outcome, independently verify research, or approve a proposed method.
+
+For a first run without `.strataa/project.json`, report that missing marker and offer the bounded bootstrap below. Create it only if the user requested bootstrap/indexing or another write task; an inspection request remains read-only even when records are missing. After a successful inspection, read the relevant source paths and linked history to answer the question, preserving negative results, conflicts and unknown acceptance. After a requested update, rerun the helper to check the saved records. If the helper is not installed, locate the actual Strataa package through the host's plugin metadata; do not launch Dashboard or invent a second validator.
 
 ### Safe, bounded discovery
 
@@ -30,7 +43,7 @@ Resolve the intended project root from the user's request and current workspace.
 3. **Build Top-down links.** Reuse existing concepts first. Relate field → problem → method → technique only as supported by the material. A field has no parent; every other concept has a parent at the immediately preceding level. Use shared concepts where meanings genuinely match, not merely where names look similar. Partial hierarchies are valid: do not invent levels or equivalence just to fill a diagram. Put uncertainty and linking rationale in `description`.
 4. **Recover BuildUp history conservatively.** Extract questions, hypotheses, documented choices, planned/executed experiments and reported results. Connect each record to relevant source and concept IDs and its actual predecessor via `parentId`. If chronology or motivation is missing, say so and leave `parentId` null rather than fabricating a chain. Put alternatives and rationale only where recorded; mark inferred rationale explicitly. Retrospective reconstruction is not a new user decision.
 5. **Summarize the current project.** `project.summary` should explain the objective, current supported state, key direction, source coverage and important gaps. `project.nextStep` is one concrete next action that resolves the most useful gap or advances the current recorded choice. Label a proposed action as proposed, not authorized or completed. Do not leave next action hidden in a paper summary.
-6. **Save and hand off.** Write the exact schema below to `.strataa/project.json`. Check references, hierarchy, quote containment and JSON structure using local tools only; do not ask a second model to reanalyze it. Save atomically through a temporary file in `.strataa/` followed by rename when the host supports it. Re-read any concurrently changed manifest and merge without losing existing history; do not overwrite another agent's changes. Report the manifest path, coverage, key gaps and next action. The user can then connect the project root in Dashboard.
+6. **Save and hand off.** Only on a requested write task, write the exact schema below to `.strataa/project.json`. Save atomically through a temporary file in `.strataa/` followed by rename when the host supports it. Re-read any concurrently changed manifest and merge without losing existing history; do not overwrite another agent's changes. Run the packaged CLI to check references, hierarchy, quote containment and JSON structure; do not ask a second model to reanalyze it. Report the manifest path, coverage, key gaps and next action. No Dashboard connection is needed.
 
 If no safe relevant evidence exists, a manifest with all three arrays empty is honest. Explain the gap in the summary and propose a specific source to inspect next. Do not use the bundled example as evidence for the user's project.
 
@@ -40,7 +53,7 @@ The schema deliberately has no confidence or epistemic-status keys. Use literal 
 
 - **Observed:** directly read text or an available recorded outcome. Describe the scope: “README states …” or “the saved log reports …”, not “verified correct” merely because a document says so.
 - **Inferred:** your interpretation, proposed relationship or reconstructed motivation. Cite supporting material while stating what the quote does not establish.
-- **Unknown:** no available support, unresolved conflict, missing execution/acceptance or uninspected material. Keep `evidence: []` when no actual supporting quote exists; Dashboard flags the gap. Never fill it with a fabricated quote.
+- **Unknown:** no available support, unresolved conflict, missing execution/acceptance or uninspected material. Keep `evidence: []` when no actual supporting quote exists; the CLI flags the gap. Never fill it with a fabricated quote.
 
 Every evidence item is `{sourceId, quote}`. Read the referenced source and copy a real contiguous excerpt. After whitespace normalization, the entire quote must occur in that source text. Do not paraphrase inside `quote`, add ellipses, splice distant passages, or quote your own summary as proof of an underlying claim. `sourceIds` includes each evidence source. Quotes establish what the source says, not necessarily its truth; interpretation belongs outside the quote.
 
@@ -124,4 +137,4 @@ Do not run either command blindly, overwrite an existing installed skill without
 
 In Strataa, a regular non-symlink `.strataa/project.json` in the session's working root opts the project into this skill during both Solo and Brain handoffs. Only the bundled skill is injected as instructions, never the manifest's content. Preserve read-only requests: do not update records if the user asked only to inspect. The main executor integrates records; do not let parallel workers overwrite the manifest.
 
-`example.json` is a complete demonstration, not a project template to populate with invented facts. Its sole source is the bundled `example-source.md`. To view it in Dashboard, copy `example-source.md` to an otherwise disposable demo root and copy `example.json` to that root's `.strataa/project.json`; connect that demo root. No installation, experiment or user acceptance is represented by the example. For a real project, analyze its own files instead.
+`example.json` is a complete demonstration, not a project template to populate with invented facts. Its sole source is the bundled `example-source.md`. To inspect it, copy `example-source.md` to an otherwise disposable demo root and copy `example.json` to that root's `.strataa/project.json`; run the resolved package's `project-cli.mjs` on that demo root. A portable copy of the skill alone does not include the CLI: retain access to the full Strataa package for the helper. No installation, experiment or user acceptance is represented by the example. For a real project, analyze its own files instead.

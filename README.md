@@ -1,12 +1,13 @@
-# Strataa — Project Research Workspace & OMP Harness
+# Strataa — CLI Research & Engineering Skills
 
-**에이전트가 프로젝트 근거·Top-down·BuildUp을 기록하고, 사람은 디렉터리를 연결해 요약과 다음 행동을 확인합니다.**
+**CLI 에이전트가 프로젝트 근거·Top-down·BuildUp을 기록하고, 현재 상태·근거 누락·다음 행동을 짧게 보고합니다. Dashboard는 선택 사항이며 자동 실행하지 않습니다.**
 
 [ARIS](https://github.com/wanshuiyin/auto-claude-code-research-in-sleep)의 원본 스킬 87개를 OMP의 native 에이전트·도구·대화 UI에 연결하는 독립 플러그인입니다. **Router → Brain → Worker + 별도 세션 Reviewer → Brain 최종 종합**으로 연구 작업을 실행하고, 일반 작업은 Solo가 주도합니다. Router가 경로와 **단계별 종속성·목표·병렬도**를 결정하고, 같은 의존 깊이의 독립 단계들을 하나의 실행 Wave로 묶습니다. 모든 역할은 OMP 전체 모델 목록에서 선택하며 기존 조합을 추천 기본값으로 제공합니다. OMP 본체·공통 하네스·전역 기본값·인증·재귀 설정은 변경하지 않습니다.
 
 - 저장소: [myunhh/Strataa](https://github.com/myunhh/Strataa)
 - 플러그인 ID: `omp-agent-strataa` · 명령: `/strataa`
 - 기반 프로젝트: ARIS 원본 스킬·보조 파일을 고정 commit으로 포함하며, 원본 MIT 라이선스는 [`ARIS-LICENSE`](ARIS-LICENSE)에 보존합니다. ARIS·OMP 공식 배포판과는 별개의 적용판입니다.
+- 엔지니어링 팩: [pstack](https://github.com/cursor/plugins/tree/bf0c7cd80abdbf7fe47b634978a7d1b4071f71a7/pstack) v0.15.42의 **58개 스킬·2개 에이전트·560개 원본 파일**을 포함합니다. Copyright 2026 Lauren Tan, [MIT 라이선스](vendor/pstack/LICENSE). 원본과 OMP 적용 코드를 분리합니다.
 
 ## 설치와 사용
 
@@ -32,6 +33,7 @@ node install.mjs
 ```
 
 - `/strataa skills`: 설치된 ARIS 스킬 87개, 원본 commit, 설치 경로와 모델·native task 준비 상태.
+- `/strataa pstack`: pstack 전체 목록·버전·원본 무결성 검사. `/poteto-mode`, `/architect`, `/interrogate`, `/why` 등 개별 스킬도 직접 호출할 수 있습니다.
 - `/strataa models`: **전체 역할에 같은 모델 / 역할별 선택 / 추천 기본 조합 복원**. 모델과 지원 추론 강도를 선택하며 취소하면 저장하지 않습니다.
 - `/strataa models all <provider/model> [effort]`: 일곱 역할을 한 모델로 설정. 강도 생략 시 `auto`.
 - `/strataa models default`: 기존 추천 조합 복원.
@@ -63,6 +65,16 @@ node install.mjs
 계획만 요청하면 실행 스킬을 선택하지 않습니다. 파일명·설명에 “실험”, “overnight”가 있다는 이유만으로 일반 코드 수정이나 설정 변경을 실험 실행으로 취급하지 않습니다. 환경 정보가 부족해도 ARIS 경로를 유지하며 실행자가 프로젝트의 실제 자원·권한·필수 입력을 확인합니다. 요청한 시간·라운드·비용 한도와 스킬의 종료 조건을 따르며, 밤샘 요청을 무한 반복이나 새 유료 자원 임대로 해석하지 않습니다.
 
 OMP의 개별 스킬 slash command를 직접 실행하면 Strataa 입력 라우팅을 거치지 않으므로 아래 OMP 리뷰어 변환 계약이 자동 적용되는 경로와 구분해야 합니다.
+
+### pstack CLI 적용
+
+`/strataa on`의 Solo 코딩 작업은 `poteto-mode`를 통해 설계·범위 확인·구현·실행 근거를 연결합니다. ARIS 연구 작업의 Brain/Worker/Reviewer 계약은 바꾸지 않습니다. 전체 스킬을 매번 문맥에 넣지 않고 필요한 원본과 leaf skill만 읽습니다.
+
+- 원본: [`vendor/pstack`](vendor/pstack), 파일별 출처·SHA-256·권한: [`pstack-provenance.json`](pstack-provenance.json).
+- OMP 진입점: `skills/<name>/SKILL.md`, `agents/poteto-agent.md`, `agents/comment-sicko.md`. [OMP 적용 계약](pstack-omp.md)이 Cursor 전용 지침보다 우선합니다.
+- 기존 모델 선택을 유지하며 원본의 모델 fallback·전역 설정 변경·자동 PR/push/merge는 가져오지 않습니다. 같은 모델의 여러 세션을 교차 모델 검증으로 부르지 않습니다.
+- Cursor Automation·Bugbot 같은 전용 서비스는 OMP에서 제공한다고 주장하지 않습니다. 외부 helper 의존성은 자동 설치하지 않으며 필요한 기능이 없으면 그 단계를 미완료로 보고합니다.
+
 
 ## 실행 계약
 
@@ -108,23 +120,25 @@ OMP의 개별 스킬 slash command를 직접 실행하면 Strataa 입력 라우�
 
 취소·세션 이동 시 늦게 도착한 결과로 새 작업을 실행하지 않습니다. 같은 세션의 compaction은 진행 중인 native 검토 추적을 보존합니다. 시각화는 UI 전용이며 추가 모델 응답을 만들지 않습니다. 이전 Flow의 모델 표시는 당시 기록 그대로 유지합니다.
 
-## 프로젝트 디렉터리 연결
+## CLI 프로젝트 기록
 
-1. 기존 프로젝트에서 에이전트에게 **“strataa-project 스킬로 이 프로젝트의 기존 문서·코드·공개 실험 결과를 분석해 `.strataa/project.json`을 만들어 줘. Top-down과 BuildUp을 근거에 연결하고 모르는 내용은 비워 둬.”**라고 요청합니다. Strataa 프로젝트가 아니어도 같은 스킬을 사용할 수 있습니다.
-2. 설치한 Strataa 폴더에서 `npm run dashboard`로 실행하고 **http://127.0.0.1:4310**을 엽니다.
-3. 프로젝트의 절대 경로 또는 `~/…`를 입력해 연결합니다. 전체 요약·다음 행동·근거 누락부터 보고, Top-down·BuildUp·출처를 필요할 때 펼칩니다. 화면이 보이는 동안 5초마다 기록을 다시 읽습니다.
+1. 기존 프로젝트의 OMP CLI에서 **“strataa-project 스킬로 기존 문서·코드·공개 결과를 `.strataa/project.json`에 정리해 줘. Top-down과 BuildUp을 근거에 연결해 줘.”**라고 요청합니다.
+2. 상태를 확인할 때 **“strataa-project로 현재 결론, 근거 누락, 다음 행동 하나만 알려줘. 파일은 수정하지 마.”**라고 요청합니다.
+3. 모델 없이 구조·인용만 검사하려면 설치한 Strataa 폴더에서 `node project-cli.mjs /절대/프로젝트/경로`를 실행합니다. `--json`은 검증된 전체 기록을 출력합니다. 서버·연결 등록·LLM 호출 없이 동작합니다.
 
 ### 기록하는 쪽 / 읽는 쪽
 
 - **작업 에이전트:** [`strataa-project`](skills/strataa-project/SKILL.md)로 기존 자료를 의미 분석하고 기록합니다. 이후 실제 결정·관측이 바뀔 때 같은 ID를 유지하며 갱신합니다. 사람이 논문마다 필드를 입력할 필요가 없습니다. 스킬을 쓰는 에이전트의 통상 모델 사용량은 발생합니다.
-- **Dashboard:** 명시한 파일의 인용·ID·계층·참조를 로컬 검증하고 구조화된 기록을 표시합니다. 연결·새로고침은 LLM 호출이나 과금을 하지 않습니다. 기록이 없는 디렉터리를 임의로 전부 스캔하거나 내용을 추측하지 않습니다.
+- **CLI 검사:** 명시한 파일의 인용·ID·계층·참조를 로컬 검증하고 요약을 출력합니다. 기록이 없는 디렉터리를 추측하거나 실험 결과를 재평가하지 않습니다. 잘못된 기록은 nonzero exit로 실패하며 파일을 수정하지 않습니다.
 - **Strataa 자동 유지:** 프로젝트 루트의 `.strataa/project.json`이 있으면 Solo와 Brain handoff에 bundled 기록 스킬을 추가합니다. 읽기 전용 요청에서는 수정하지 않고 메인 에이전트가 기록을 통합합니다. 존재하지 않는 프로젝트에는 자동 기록을 강제하지 않습니다. 다른 호스트에서는 스킬을 명시적으로 적용하세요.
 
 계약은 `.strataa/project.json`의 `schemaVersion: 1`, `project`, `sources`, `concepts`, `buildUps`입니다. 정확한 필드와 예시는 [스킬](skills/strataa-project/SKILL.md)과 [예제](skills/strataa-project/example.json)에 있습니다. 개념은 분야→문제→방법→기법, BuildUp은 질문·가설·결정·실험·결과를 부모와 근거에 연결합니다. **accepted는 기록된 선택이지 과학적 검증 통과가 아닙니다.** 불확실한 과거 의도·미실행 실험·비공개 추론을 만들어 쓰지 않습니다.
 
-일반 프로젝트의 다른 에이전트에도 쓰려면 `skills/strataa-project/`를 해당 프로젝트의 `.agents/skills/strataa-project/` 또는 해당 호스트가 지원하는 스킬 경로에 복사하고 스킬 이름을 지정하세요. 전역 지침이나 모델 설정을 자동 변경하지 않습니다.
+다른 호스트에서는 스킬과 Strataa 설치 루트의 `project-cli.mjs` 및 `dashboard/projects.js`를 함께 사용할 수 있어야 합니다. 스킬 폴더만 복사하면 CLI 검증기가 빠집니다. 전역 지침이나 모델 설정을 자동 변경하지 않습니다.
 
-### 보안·저장·기존 서재
+### 선택 사항: 기존 Dashboard·서재
+
+기존 UI가 필요한 경우에만 Strataa 설치 폴더에서 `npm run dashboard`로 시작해 http://127.0.0.1:4310 을 엽니다. CLI 기록·검증에는 필요하지 않습니다. 기존 DB·연결 목록은 보존하며 자동으로 서버를 시작하지 않습니다.
 
 서버는 loopback 전용이며 다른 Origin/Host의 쓰기를 거부합니다. 연결 목록만 `STRATAA_RESEARCH_DIR`(기본 `${XDG_DATA_HOME:-~/.local/share}/omp-agent-dialogue/research`)에 저장하고 프로젝트 파일은 읽기 전용입니다. 연결 해제는 프로젝트 파일이나 논문을 삭제하지 않습니다. manifest 2 MiB, 출처별 2 MiB, 출처 총합 20 MiB 한도를 적용하고 심볼릭 링크·프로젝트 밖 경로·비밀 파일을 거부합니다. 일반 문서에 적힌 비밀 값까지 자동 판별하지는 못하므로 기록 전 제거하세요. 잘못된 갱신은 명시적으로 오류를 표시하며 이전 자료를 최신이라고 속이지 않습니다.
 

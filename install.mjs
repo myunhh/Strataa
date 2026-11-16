@@ -4,6 +4,7 @@ import { chmod, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promis
 import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { validatePstackInstall } from "./pstack-runtime.js";
 
 const source = path.dirname(fileURLToPath(import.meta.url));
 const manifest = JSON.parse(await readFile(path.join(source, "package.json"), "utf8"));
@@ -16,7 +17,7 @@ const match = version.match(/(\d+)\.(\d+)\.(\d+)/);
 if (!match || Number(match[1]) < 18 || (Number(match[1]) === 18 && Number(match[2]) < 15)) {
   throw new Error(`OMP >=18.15.0 is required; found ${version}`);
 }
-const files = ["package.json", "index.js", "controller.js", "project-context.js", "protocol.js", "model-config.js", "waves.js", "transport.js", "prompt-summary.js", "flow.js", "flow-view.js", "flow-store.js", "flow-watch.js", "live-hosts.js", "saved-flow.js", "aris-skills.js", "aris-runtime.js", "aris-provenance.json", "ARIS-LICENSE", "install.mjs", "README.md", "CHANGELOG.md"];
+const files = ["package.json", "index.js", "controller.js", "project-context.js", "project-cli.mjs", "pstack-runtime.js", "pstack-omp.md", "pstack-provenance.json", "protocol.js", "model-config.js", "waves.js", "transport.js", "prompt-summary.js", "flow.js", "flow-view.js", "flow-store.js", "flow-watch.js", "live-hosts.js", "saved-flow.js", "aris-skills.js", "aris-runtime.js", "aris-provenance.json", "ARIS-LICENSE", "install.mjs", "README.md", "CHANGELOG.md"];
 for (const directory of ["agents", "test"]) {
   for (const name of (await readdir(path.join(source, directory))).sort()) {
     if (name.endsWith(directory === "agents" ? ".md" : ".test.js")) files.push(`${directory}/${name}`);
@@ -32,7 +33,8 @@ async function walk(directory) {
     else throw new Error(`Refusing to ship non-regular file: ${relative}`);
   }
 }
-for (const directory of ["skills", "tools", "templates", "dashboard"]) await walk(directory);
+for (const directory of ["skills", "tools", "templates", "dashboard", "vendor/pstack"]) await walk(directory);
+const pstack = validatePstackInstall(source);
 const provenance = JSON.parse(await readFile(path.join(source, "aris-provenance.json"), "utf8"));
 for (const entry of provenance.files) {
   if (!files.includes(entry.path)) throw new Error(`ARIS pack file listed in aris-provenance.json is missing from the checkout: ${entry.path}`);
@@ -62,5 +64,6 @@ for (let index = 0; index < files.length; index++) {
   }
 }
 console.log(`Shipped ${files.length} files including ${provenance.skills.length} ARIS skills from ${provenance.source.url}@${provenance.source.commit.slice(0, 12)}`);
+console.log(`Shipped pstack ${pstack.version}: ${pstack.count} skills, ${pstack.agents} agents, ${pstack.files} original files @${pstack.commit.slice(0, 12)}`);
 execFileSync(omp, ["plugin", "link", destination], { stdio: "inherit" });
 console.log(`Installed omp-agent-strataa@${manifest.version} for ${version}\n${destination}\nIn OMP: /reload-plugins, /strataa models, then /strataa on (recommended mix, all-role model or per-role selection)\nIn another OMP terminal: /strataa watch (read-only multi-session flow monitor)`);
