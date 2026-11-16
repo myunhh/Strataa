@@ -40,20 +40,29 @@ Installation copies the bundle to a fingerprinted directory under `~/.local/shar
 
 ```mermaid
 flowchart TD
-    request["Request"] --> router{"Router"}
-    router -->|"Ordinary work"| solo["Solo + pstack as needed"]
-    solo --> soloWork["Work directly or delegate"]
-    soloWork --> answer["Verify and answer"]
-    router -->|"Research or review"| brain["Brain + ARIS + selective pstack"]
-    brain --> direct["Work directly"]
-    brain --> worker["Worker if needed"]
-    brain --> reviewer["Independent Reviewer if needed"]
-    direct --> synthesis["Brain synthesis"]
+    request["User request"] --> router{"Router<br/>Choose route and task dependencies"}
+
+    router -->|Explanation, coding, prose cleanup| solo["Solo<br/>Select useful pstack skills"]
+    solo --> soloWork["Work directly or delegate as needed"]
+    soloWork --> soloAnswer["Verify the change and answer"]
+
+    router -->|Research, experiments, independent review| brain["Brain<br/>ARIS procedure + useful pstack skills"]
+    brain --> direct["Direct analysis, exploration, planning and writing"]
+    brain -->|When concrete execution is needed| worker["Worker<br/>Implementation, collection, measurement + useful pstack"]
+    brain -->|When review is needed| reviewer["Independent Reviewer<br/>Inspect original evidence"]
+
+    direct --> synthesis["Brain<br/>Synthesize results and reviews"]
     worker --> synthesis
     reviewer --> synthesis
+    synthesis --> researchAnswer["Final answer<br/>Conclusions, uncertainty and next action"]
+
+    soloAnswer -. Projects with records enabled .-> records["strataa-project<br/>Update Top-down, BuildUp and evidence"]
+    researchAnswer -. Projects with records enabled .-> records
 ```
 
 The branches are options, not mandatory stages. Brain can explore ideas, inspect evidence, plan, or write directly. When a review needs a newly produced artifact, the Reviewer waits for its producer. A Worker does not automatically trigger a Reviewer.
+
+Prose cleanup does not force a review. Project records are updated only for actual changes; read-only requests do not modify records. The dotted links show record maintenance, not a mandatory step after every answer.
 
 Router selects ordinary work or 1–4 ARIS skills and a dependency plan. Solo owns ordinary work. Brain is the main research session and owns assumptions, criteria, decomposition, claim decisions, and the final answer. Workers execute bounded packets. Reviewers inspect evidence independently in separate read-only sessions.
 
