@@ -47,9 +47,11 @@ function harness(runTurn, entries = [], skills = skillsModule(), readAgentOutput
   let key;
   let command;
   let savedModels;
+  const approvals = [];
   const modelSettings = settings ?? {
     read: ({ fallback = DEFAULT_MODELS } = {}) => savedModels ?? normalizeModelConfig(fallback),
     write: models => (savedModels = normalizeModelConfig(models)),
+    approve: async models => { approvals.push(normalizeModelConfig(models)); },
   };
   const models = [
     { provider: "anthropic", id: "claude-sonnet-4-6", family: "anthropic" },
@@ -106,7 +108,7 @@ function harness(runTurn, entries = [], skills = skillsModule(), readAgentOutput
     (getFlow, ...args) => { liveFlow = getFlow; return createFlowView(getFlow, ...args); }, skills, readAgentOutput, monitor, modelSettings);
   handlers.get("session_start")({}, ctx);
   return {
-    ctx, pi, entries, cards, prompts, promptModels, promptEfforts, notices, models, calls, skills, modelSettings,
+    ctx, pi, entries, cards, prompts, promptModels, promptEfforts, notices, models, calls, skills, modelSettings, approvals,
     command: args => command(args, ctx),
     flow: () => liveFlow?.(),
     input: (text, extra = {}) => handlers.get("input")({ text, source: "interactive", ...extra }, ctx),
@@ -136,8 +138,10 @@ const deferred = () => {
 function heldTurn() {
   let release;
   let signal;
+  const started = deferred();
   return {
-    run: args => { signal = args.signal; return new Promise(resolve => { release = resolve; }); },
+    started: started.promise,
+    run: args => { signal = args.signal; started.resolve(); return new Promise(resolve => { release = resolve; }); },
     release: () => release({ text: '{"route":"solo","reason":"late","waves":[]}', stopReason: "stop" }),
     get signal() { return signal; },
   };
@@ -204,6 +208,7 @@ test("Esc cancels the router and a late decision cannot execute or create a hand
   await h.command("on");
   h.input("change production configuration");
   const running = h.flush();
+  await hold.started;
   assert.deepEqual(h.press("\x1b"), { consume: true });
   assert.equal(hold.signal.aborted, true);
   hold.release();
@@ -228,6 +233,7 @@ test("session switch invalidates in-flight work even when transport finishes suc
   await h.command("on");
   h.input("task in old session");
   const running = h.flush();
+  await hold.started;
   await h.event("session_before_switch");
   h.changeSession("new");
   h.event("session_switch");
@@ -446,6 +452,39 @@ test("Models offers the entire catalog and applies one model and effort to every
   assert.deepEqual(resumed.event("before_subagent_spawn", { invocationKind: "task", agent: "scout" }), { model: `${ASTRA}:high` });
   await resumed.command("off");
   await resumed.event("session_shutdown");
+});
+
+test("approval rejection preserves the selected profile and leaves routing off", async () => {
+  const h = harness(review);
+  h.modelSettings.approve = async () => { throw new Error("operator overlay blocks selection"); };
+  await h.command(`worker ${ASTRA} high`);
+  assert.deepEqual(h.modelSettings.read(), DEFAULT_MODELS);
+  assert.equal(selectedState(h), undefined);
+  await h.command("on");
+  assert.equal(h.input("must stay off"), undefined);
+  assert.match(h.notices.at(-1)[0], /operator overlay blocks selection/);
+});
+
+test("a session switch during approval cannot save a late model selection", async () => {
+  const h = harness(review);
+  const approval = deferred();
+  h.modelSettings.approve = () => approval.promise;
+  const command = h.command(`worker ${ASTRA} high`);
+  h.changeSession("new-session");
+  h.event("session_switch");
+  approval.resolve();
+  await command;
+  assert.deepEqual(h.modelSettings.read(), DEFAULT_MODELS);
+  assert.equal(selectedState(h), undefined);
+});
+
+test("model selection cannot revoke a running worker's model approval", async () => {
+  const h = await startedReview();
+  const before = h.approvals.length;
+  await h.command(`worker ${ASTRA} high`);
+  assert.equal(h.approvals.length, before);
+  assert.deepEqual(h.modelSettings.read(), DEFAULT_MODELS);
+  assert.match(h.notices.at(-1)[0], /작업 완료 후 모델/);
 });
 
 test("cancelling effort selection leaves all saved roles and enabled state unchanged", async () => {
@@ -908,6 +947,7 @@ test("closing the flow explorer during routing does not cancel or execute the re
   await h.command("on");
   h.input("Plan the implementation.");
   const routing = h.flush();
+  await hold.started;
   const entriesBefore = h.entries.length;
   const cardsBefore = h.cards.length;
   const viewing = h.command("flow");
@@ -1294,6 +1334,7 @@ test("watcher input and close never cancel its producer; navigation disposes onl
   await h.command("on");
   h.input("A routed request");
   const routing = h.flush();
+  await hold.started;
   const viewing = h.command("watch");
   assert.equal(h.press("\x03"), undefined);
   assert.equal(hold.signal.aborted, false);
@@ -1417,9 +1458,10 @@ test("role-specific selection crosses model families and recommended restore rep
   const spawn = h.event("before_subagent_spawn", { invocationKind: "task", agent: REVIEWER_AGENT, spawnKey: "Review__One" });
   assert.deepEqual(spawn, { model: "anthropic/claude-sonnet-4-6:auto" });
   await h.command("models default");
+  assert.deepEqual(h.modelSettings.read(), selected, "a running flow retains its model grants");
+  await h.command("stop");
+  await h.command("models default");
   assert.deepEqual(h.modelSettings.read(), DEFAULT_MODELS);
-  assert.deepEqual(h.event("before_subagent_spawn", { invocationKind: "task", agent: REVIEWER_AGENT, spawnKey: "Review__Two" }), spawn,
-    "restoring the default profile must not change an active run");
 });
 
 test("external profile changes affect the next request, not the current Router, executor or summary", async () => {
@@ -1436,6 +1478,7 @@ test("external profile changes affect the next request, not the current Router, 
   await h.command("on");
   h.input("First request");
   const routing = h.flush();
+  await hold.started;
   h.modelSettings.write(uniformModelConfig("anthropic/claude-sonnet-4-6", "auto"));
   hold.release();
   await routing;

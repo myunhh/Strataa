@@ -6,6 +6,8 @@ import { createFlowPublisher } from "./flow-store.js";
 import { createFlowWatch } from "./flow-watch.js";
 import { generatePromptSummary } from "./prompt-summary.js";
 import { getArisCatalog, loadArisSkills, validateArisInstall } from "./aris-skills.js";
+import { readModelConfig, writeModelConfig } from "./model-config.js";
+import { approveModels } from "./model-approval.js";
 
 const AGENT_ID = /^[A-Za-z0-9][A-Za-z0-9_.-]*$/;
 
@@ -33,5 +35,5 @@ export default function agentStrataa(pi) {
     publisher: createFlowPublisher(),
     createWatch: createFlowWatch,
     summarizePrompt: (ctx, options) => generatePromptSummary({ ...options, runTurn: turn => runModelTurn(ctx, turn) }),
-  });
+  }, { read: readModelConfig, write: writeModelConfig, approve: approveModels });
 }

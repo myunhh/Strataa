@@ -14,11 +14,11 @@ if (manifest.name !== "omp-agent-strataa" || !/^\d+\.\d+\.\d+$/.test(manifest.ve
 const omp = process.env.OMP_BIN || "omp";
 const version = execFileSync(omp, ["--version"], { encoding: "utf8" }).trim();
 const match = version.match(/(\d+)\.(\d+)\.(\d+)/);
-if (!match || Number(match[1]) < 18 || (Number(match[1]) === 18 && Number(match[2]) < 15)) {
-  throw new Error(`OMP >=18.15.0 is required; found ${version}`);
+if (!match || Number(match[1]) < 18 || (Number(match[1]) === 18 && (Number(match[2]) < 20 || (Number(match[2]) === 20 && Number(match[3]) < 3)))) {
+  throw new Error(`OMP >=18.20.3 is required; found ${version}`);
 }
 const files = ["package.json", "index.js", "controller.js", "project-context.js", "project-cli.mjs", "pstack-runtime.js", "pstack-omp.md", "pstack-provenance.json", "protocol.js", "model-config.js", "waves.js", "transport.js", "prompt-summary.js", "flow.js", "flow-view.js", "flow-store.js", "flow-watch.js", "live-hosts.js", "saved-flow.js", "aris-skills.js", "aris-runtime.js", "aris-provenance.json", "ARIS-LICENSE", "install.mjs", "README.md", "README.ko.md", "CHANGELOG.md"];
-files.push("ADHD-LICENSE");
+files.push("ADHD-LICENSE", "model-approval.js");
 for (const directory of ["agents", "test"]) {
   for (const name of (await readdir(path.join(source, directory))).sort()) {
     if (name.endsWith(directory === "agents" ? ".md" : ".test.js")) files.push(`${directory}/${name}`);

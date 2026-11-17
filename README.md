@@ -9,11 +9,11 @@ Strataa connects research procedures and engineering skills to OMP's native agen
 - Research procedures: 87 upstream [ARIS](https://github.com/wanshuiyin/auto-claude-code-research-in-sleep) skills.
 - Engineering support: 58 skills and 2 agents from [pstack](https://github.com/cursor/plugins/tree/bf0c7cd80abdbf7fe47b634978a7d1b4071f71a7/pstack) v0.15.42.
 
-This is an independent OMP adaptation, not an official ARIS or OMP distribution. It does not change OMP's core, shared harness, global defaults, authentication, or recursion settings.
+This is an independent OMP adaptation, not an official ARIS or OMP distribution. It preserves OMP's core, shared harness, default model choices, authentication, and recursion settings. Selecting or enabling Strataa models registers dedicated OMP approval roles.
 
 ## Install
 
-Requires Node.js 22.13 or later and OMP 18.15.0 or later.
+Requires Node.js 22.13 or later and OMP 18.20.3 or later.
 
 ```sh
 git clone https://github.com/myunhh/Strataa.git
@@ -130,7 +130,9 @@ Roles are `router`, `brain`, `worker`, `reviewer`, `solo`, `summary`, and `analy
 
 These defaults are configuration choices, not evidence of model superiority. `auto` uses the host/model automatic reasoning setting and also works for non-reasoning models. An unavailable model or unsupported explicit effort fails without fallback. Separate sessions on the same model are not cross-model validation.
 
-Model settings are Strataa-specific and host-local at `${XDG_CONFIG_HOME:-~/.config}/strataa/models.json`. New sessions and the Dashboard share this file. A run freezes its selected models and efforts at startup, so edits apply to the next request or analysis. Invalid shared configuration is an error. Use `/strataa models default` to recover. Old session model settings are imported only when the shared file is absent.
+Model settings are host-local at `${XDG_CONFIG_HOME:-~/.config}/strataa/models.json`. New sessions and the Dashboard share this file. A run freezes its selected models and efforts at startup. Wait for that run to finish before changing models. Invalid shared configuration is an error. Use `/strataa models default` to recover. Old session model settings are imported only when the shared file is absent.
+
+Model selection, `/strataa on`, and the next routed request synchronize the selected models into OMP's global `modelRoles.strataa-<role>` entries. They also enable `task.perCallModel` and add the selected identities to an existing nonempty global allowlist. Existing `default`, `slow`, other roles, agent overrides, and credentials are unchanged. No separate approval command is needed. Project, config-overlay, and runtime restrictions remain effective and produce an explicit error rather than being overwritten. Turning Strataa off stops routing but retains these model registrations.
 
 Router, Workers, Reviewers, and request summaries add model usage. Routing receives the request, images, and up to 24,000 characters of recent text. Check your providers' data-retention policies.
 

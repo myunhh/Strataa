@@ -13,7 +13,7 @@ OMP·ARIS·pstack 공식 배포판과는 별개의 적용판입니다. OMP 본�
 
 ## 설치
 
-Node.js 22.13 이상과 OMP 18.15.0 이상이 필요합니다.
+Node.js 22.13 이상과 OMP 18.20.3 이상이 필요합니다.
 
 ```sh
 git clone https://github.com/myunhh/Strataa.git
@@ -133,7 +133,9 @@ Router는 요청과 최근 대화를 봅니다. 실험·학습 실행은 `run-ex
 
 `<provider/model>`은 실제 OMP 모델 ID로 바꿉니다. `/strataa <역할>`처럼 모델 인자를 생략하면 선택창을 엽니다. `models all`에서 강도를 생략하면 `auto`입니다. 모델별 지원 강도만 선택할 수 있고, 선택창을 취소하면 저장하지 않습니다. `models default`는 패키지에 보존된 기본 조합을 복원하며 모델 간 우열을 입증하지 않습니다.
 
-설정은 `${XDG_CONFIG_HOME:-~/.config}/strataa/models.json`에 저장합니다. 같은 호스트의 Strataa 세션과 Dashboard가 공유하지만 OMP 전역 설정은 바꾸지 않습니다. 실행 시작 시 모델·강도를 고정하므로 변경은 다음 요청이나 분석부터 적용됩니다.
+설정은 `${XDG_CONFIG_HOME:-~/.config}/strataa/models.json`에 저장하며 같은 호스트의 Strataa 세션과 Dashboard가 공유합니다. 실행 시작 시 모델·강도를 고정합니다. 진행 중인 작업이 끝난 뒤 모델을 변경하세요.
+
+모델 선택, `/strataa on`, 다음 라우팅 요청에서 선택 모델을 OMP 전역 `modelRoles.strataa-<역할>`에 자동 등록합니다. `task.perCallModel`도 켜고, 전역 허용 목록이 비어 있지 않으면 선택한 모델 ID를 추가합니다. 기존 `default`·`slow` 등의 역할, 에이전트 오버라이드, 인증 정보는 유지합니다. 별도 승인 명령은 필요 없습니다. 프로젝트·설정 오버레이·런타임의 제한은 덮어쓰지 않고 명시적인 오류로 알립니다. Strataa를 꺼도 모델 등록은 유지합니다.
 
 공유 파일이 없을 때만 구버전 세션의 역할별 모델을 복원합니다. 잘못된 파일이나 사용할 수 없는 모델·강도를 조용히 대체하지 않습니다. `/strataa models` 또는 `/strataa models default`로 명시적으로 설정합니다. 과거 Flow는 당시 모델 기록을 유지합니다.
 

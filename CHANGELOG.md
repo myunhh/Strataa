@@ -1,5 +1,11 @@
 # Changelog
 
+## 4.11.2 — 2026-11-17
+
+- Register selected Strataa models as dedicated global OMP `strataa-*` roles through the host settings API. Synchronize on selection, enable, and routed requests, without changing existing default or slow roles.
+- Enable per-call model selection and extend an existing nonempty operator allowlist with selected identities. Preserve project and runtime restrictions instead of bypassing approval checks.
+- Reject model changes during a running flow and discard selections that finish approval after session navigation. Require OMP 18.20.3 or later.
+
 ## 4.11.1 — 2026-11-17
 
 - Bundle i-have-adhd v0.3.0 rules and its OMP-compatible extension with the MIT license. ADHD-friendly output defaults on independently of Strataa routing.

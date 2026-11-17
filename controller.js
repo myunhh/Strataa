@@ -4,7 +4,7 @@ import { ARIS_ROUTES, DEFAULT_REVIEW_SKILL, collectContext, routeRequest } from 
 import { FLOW, createFlow, expectNative, finishFlow, flowText, nativeReference, observeNative, planFlow, publicText, restoreFlow, reviewProblem, startExecution, updateStage } from "./flow.js";
 import { REVIEWER_AGENT, WORKER_AGENT, arisHandoff, arisSpawnPolicy, createArisRun, escapeHarnessTags, hydrateReview, prepareArisCall, recordReview } from "./aris-runtime.js";
 import { prepareWaveCall, waveHandoff } from "./waves.js";
-import { DEFAULT_MODELS, MODEL_ROLES, ROLE_LABELS, normalizeModelConfig, readModelConfig, writeModelConfig, supportedReasoning, validateModelChoice, uniformModelConfig, taskModelSelector } from "./model-config.js";
+import { DEFAULT_MODELS, MODEL_ROLES, ROLE_LABELS, normalizeModelConfig, supportedReasoning, validateModelChoice, uniformModelConfig, taskModelSelector } from "./model-config.js";
 import { projectHandoff } from "./project-context.js";
 import { getPstackCatalog, pstackHandoff, validatePstackInstall } from "./pstack-runtime.js";
 
@@ -96,7 +96,7 @@ const observedRuns = new Set();
  */
 export function registerStrataa(pi, runModelTurn, createFlowView, skills, readAgentOutput = async id => {
   throw new Error(`agent://${id} 공개 출력을 읽을 수단이 호스트에 없음`);
-}, monitor = {}, modelSettings = { read: readModelConfig, write: writeModelConfig }) {
+}, monitor = {}, modelSettings) {
   const { getArisCatalog, loadArisSkills, validateArisInstall } = {
     getArisCatalog: () => skills.getArisCatalog(),
     loadArisSkills: names => skills.loadArisSkills(names),
@@ -132,7 +132,16 @@ export function registerStrataa(pi, runModelTurn, createFlowView, skills, readAg
     status(ctx);
   };
   const refreshModels = () => { state.models = modelSettings.read({ fallback: state.models }); };
-  const saveModels = models => { state.models = modelSettings.write(normalizeModelConfig(models)); };
+  const saveModels = async (models, ctx) => {
+    const sessionId = ctx.sessionManager.getSessionId();
+    const startedAtRevision = revision;
+    models = normalizeModelConfig(models);
+    await modelSettings.approve(models, ctx);
+    if (revision !== startedAtRevision || ctx.sessionManager.getSessionId() !== sessionId) {
+      throw new Error("모델 승인 중 세션·설정이 변경되어 선택을 저장하지 않았습니다. 다시 선택하세요.");
+    }
+    state.models = modelSettings.write(models);
+  };
   const owns = run => active === run && !run.controller.signal.aborted &&
     run.ctx.sessionManager.getSessionId() === run.sessionId;
 
@@ -350,7 +359,7 @@ export function registerStrataa(pi, runModelTurn, createFlowView, skills, readAg
         { label: "추천 기본 조합 복원", description: "Terra · Fable · Opus · Astra · Luna — 기존 기본 조합" },
       ]);
       if (mode === undefined) return false;
-      if (mode === "추천 기본 조합 복원") { saveModels(DEFAULT_MODELS); return true; }
+      if (mode === "추천 기본 조합 복원") { await saveModels(DEFAULT_MODELS, ctx); return true; }
       if (mode === "역할별 모델 선택") {
         const chosen = await select("변경할 역할", MODEL_ROLES.map(key => ({
           label: ROLE_LABELS[key], description: `${previous[key].model} · ${previous[key].reasoning}`,
@@ -373,7 +382,7 @@ export function registerStrataa(pi, runModelTurn, createFlowView, skills, readAg
       supportedReasoning(metadata).map(level => ({ label: level, description: level === "auto" ? "모델 기본값" : `${level}${model === current.model && level === current.reasoning ? " · 현재 선택" : ""}` })));
     if (reasoning === undefined) return false;
     validateModelChoice(ctx.models.list(), { model, reasoning });
-    saveModels(role === "all" ? uniformModelConfig(model, reasoning) : { ...previous, [role]: { model, reasoning } });
+    await saveModels(role === "all" ? uniformModelConfig(model, reasoning) : { ...previous, [role]: { model, reasoning } }, ctx);
     return true;
   }
 
@@ -432,6 +441,7 @@ export function registerStrataa(pi, runModelTurn, createFlowView, skills, readAg
       signal: run.controller.signal, runTurn: options => runModelTurn(run.ctx, options), config: run.config,
     };
     try {
+      await modelSettings.approve(run.config, run.ctx);
       if (!owns(run)) return;
       run.ctx.ui.setStatus(CARD, `Strataa AUTO · Router ${run.config.router.model} · ${run.config.router.reasoning}`);
       paint(run, true);
@@ -981,6 +991,10 @@ export function registerStrataa(pi, runModelTurn, createFlowView, skills, readAg
         { phase: "status", skills: catalog.map(skill => skill.name), available: !problem, problem, install });
         return;
       }
+      if ((action === "models" || MODEL_ROLES.includes(action)) && tracking(ctx)?.flow.status === "running") {
+        ctx.ui.notify("실행 중인 작업의 모델 승인을 유지합니다. 작업 완료 후 모델을 변경하세요.", "warning");
+        return;
+      }
       if (active && action !== "off") {
         ctx.ui.notify("먼저 /strataa stop으로 현재 라우팅·검토를 중단하세요.", "warning");
         return;
@@ -993,15 +1007,16 @@ export function registerStrataa(pi, runModelTurn, createFlowView, skills, readAg
             assertModel(ctx, state.models, "solo");
             validateArisInstall();
             validatePstackInstall();
+            await modelSettings.approve(state.models, ctx);
           } else cancel("대화 모드를 껐습니다.");
           state.enabled = action === "on";
         } else if (action === "models") {
           if (!rest.length) { if (!await pickModels(ctx)) return; }
-          else if (rest.length === 1 && rest[0] === "default") saveModels(DEFAULT_MODELS);
+          else if (rest.length === 1 && rest[0] === "default") await saveModels(DEFAULT_MODELS, ctx);
           else if (rest[0] === "all" && rest.length >= 2 && rest.length <= 3) {
             const models = uniformModelConfig(rest[1], rest[2] || "auto");
             validateModelChoice(ctx.models.list(), models.solo);
-            saveModels(models);
+            await saveModels(models, ctx);
           } else throw new Error("/strataa models · models all <provider/model> [effort] · models default");
         } else if (MODEL_ROLES.includes(action)) {
           if (!rest.length) { if (!await pickModels(ctx, action)) return; }
@@ -1009,7 +1024,7 @@ export function registerStrataa(pi, runModelTurn, createFlowView, skills, readAg
             if (rest.length > 2) throw new Error(`/strataa ${action} [provider/model] [effort]`);
             const models = normalizeModelConfig({ ...state.models, [action]: { model: rest[0], reasoning: rest[1] || "auto" } });
             assertModel(ctx, models, action);
-            saveModels(models);
+            await saveModels(models, ctx);
           }
         } else throw new Error(HELP);
         persist(ctx);
