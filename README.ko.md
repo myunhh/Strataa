@@ -33,7 +33,11 @@ node install.mjs
 /strataa on
 ```
 
-새 세션은 기본 OFF입니다. ON 상태에서는 스킬 이름을 지정하지 않고 평소처럼 요청할 수 있습니다.
+새 세션의 **Strataa 라우팅은 기본 OFF**입니다. ON 상태에서는 스킬 이름을 지정하지 않고 평소처럼 요청할 수 있습니다.
+
+ADHD 친화 응답 스킬 `i-have-adhd`는 기본 탑재되며, 라우팅과 무관하게 **기본 ON**입니다. `/i-have-adhd off`, `stop adhd mode`, `normal mode`로 현재 세션에서 끄고 `/i-have-adhd on`으로 다시 켭니다. 저장된 세션 설정과 기존 `i-have-adhd.json`의 `alwaysOn: false`는 유지합니다. 별도 플러그인을 설치했다면 Strataa 설치 후 `omp plugin disable i-have-adhd@i-have-adhd`로 비활성화해 명령·훅 중복을 방지하세요.
+
+원본은 Ayoub Ghriss의 [i-have-adhd v0.3.0](https://github.com/ayghri/i-have-adhd/tree/839872f9d1cd634fed642b4589ce7226199cc15f)이며 [MIT 라이선스](ADHD-LICENSE)를 포함합니다. 기본 플래그 ON과 명시적 `alwaysOn` 설정 우선순위만 변경하고, 스킬 규칙과 컨텍스트 호환 헬퍼는 원문을 유지합니다.
 
 Dialogue에서 전환할 때는 새 설치가 성공한 뒤 `omp plugin uninstall omp-agent-dialogue`로 이전 등록만 제거합니다. 이전 설치본·연구 DB·세션 기록은 삭제하지 않습니다. 이전 명령 별칭은 제공하지 않으며 환경 변수는 `STRATAA_*`와 `OMP_STRATAA_FLOW_DIR`를 사용합니다. 기존 데이터 경로와 세션 직렬화 ID는 유지합니다.
 

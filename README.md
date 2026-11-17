@@ -32,6 +32,10 @@ After active OMP work finishes, run:
 
 New sessions start with routing **off**. With routing on, make requests in normal language. You do not need to name a skill.
 
+ADHD-friendly output is bundled and **on by default**, independently of routing. Use `/i-have-adhd off` (or `stop adhd mode` / `normal mode`) to disable it for the session, and `/i-have-adhd on` to re-enable it. Saved session choices and `alwaysOn: false` in the existing `i-have-adhd.json` configuration are respected. If the standalone plugin is installed, disable it with `omp plugin disable i-have-adhd@i-have-adhd` after installing Strataa to avoid duplicate commands and hooks.
+
+The bundled skill and extension come from [i-have-adhd v0.3.0](https://github.com/ayghri/i-have-adhd/tree/839872f9d1cd634fed642b4589ce7226199cc15f), copyright Ayoub Ghriss, under [MIT](ADHD-LICENSE). Strataa changes the default flag to on and gives explicit `alwaysOn` configuration precedence; the rules and context compatibility helper are unchanged.
+
 When migrating from Dialogue, first finish the new installation, then run `omp plugin uninstall omp-agent-dialogue` to remove the old registration. Do not reload an active work session. The installer preserves old immutable installations, research databases, and session history. There are no old command aliases. Environment variables use `STRATAA_*` and `OMP_STRATAA_FLOW_DIR`, while existing data paths and serialized session IDs remain compatible.
 
 Installation copies the bundle to a fingerprinted directory under `~/.local/share/omp-agent-strataa/` and registers it with `omp plugin link`. Removing the clone does not remove the installed copy. Install separately on each host. Upstream updates are not automatic.

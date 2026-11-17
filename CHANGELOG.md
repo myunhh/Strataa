@@ -1,5 +1,10 @@
 # Changelog
 
+## 4.11.1 — 2026-11-17
+
+- Bundle i-have-adhd v0.3.0 rules and its OMP-compatible extension with the MIT license. ADHD-friendly output defaults on independently of Strataa routing.
+- Preserve saved session toggles and explicit `alwaysOn: false` configuration. `/i-have-adhd off`, `stop adhd mode`, and `normal mode` disable it for the session.
+
 ## 4.11.0 — 2026-11-16
 
 - Apply selective pstack support to Solo, ARIS Brain and bounded ARIS Worker packets. Keep Reviewer independent and retain configured models, research ownership and requested review contracts.

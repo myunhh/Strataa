@@ -1,13 +1,13 @@
 {
   "name": "omp-agent-strataa",
-  "version": "4.11.0",
+  "version": "4.11.1",
   "private": true,
   "description": "Strataa CLI research and engineering skills with ARIS and pstack for OMP",
   "homepage": "https://github.com/myunhh/Strataa",
   "repository": { "type": "git", "url": "https://github.com/myunhh/Strataa.git" },
   "type": "module",
   "engines": { "node": ">=22.13" },
-  "omp": { "extensions": ["./index.js"] },
+  "omp": { "extensions": ["./index.js", "./extensions/i-have-adhd.ts"] },
   "scripts": {
     "test": "node --test test/*.test.js",
     "project": "node project-cli.mjs",
