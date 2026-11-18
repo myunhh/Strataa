@@ -55,7 +55,7 @@ function harness(runTurn, entries = [], skills = skillsModule(), readAgentOutput
   };
   const models = [
     { provider: "anthropic", id: "claude-sonnet-4-6", family: "anthropic" },
-    { provider: "openai-codex", id: "gpt-6-astra", family: "openai", reasoning: true, thinking: { efforts: ["low", "high", "xhigh", "max"] } },
+    { provider: "openai-codex", id: "gpt-6.2-astra", family: "openai", reasoning: true, thinking: { efforts: ["low", "high", "xhigh", "max"] } },
     { provider: "anthropic", id: "claude-opus-5-5", family: "anthropic", reasoning: true, thinking: { efforts: ["low", "medium", "high"] } },
     { provider: "anthropic", id: "claude-fable-5-2", family: "anthropic", reasoning: true, thinking: { efforts: ["medium", "high", "xhigh"] } },
     { provider: "openai-codex", id: "gpt-6.1-terra", family: "openai", reasoning: true, thinking: { efforts: ["low", "xhigh"] } },
@@ -149,7 +149,7 @@ function heldTurn() {
 
 const latestFlow = h => h.flow() ?? h.entries.filter(entry => entry.type === "custom" && entry.customType === FLOW).at(-1)?.data;
 const reviewRows = h => latestFlow(h).rows.filter(row => row.review === true);
-const ASTRA = "openai-codex/gpt-6-astra";
+const ASTRA = "openai-codex/gpt-6.2-astra";
 
 /** Drive one ARIS review run up to the executor prompt and return the harness. */
 async function startedReview(runTurn = review, readAgentOutput = undefined) {
@@ -271,7 +271,7 @@ test("Astra without max cannot enable Strataa or start a paid request after capa
   for (const stage of ["enable", "input"]) {
     const h = harness(solo);
     if (stage === "input") await h.command("on");
-    h.models.find(model => model.id === "gpt-6-astra").thinking.efforts = ["low", "high", "xhigh"];
+    h.models.find(model => model.id === "gpt-6.2-astra").thinking.efforts = ["low", "high", "xhigh"];
     if (stage === "enable") {
       await h.command("on");
       assert.equal(h.input("ordinary task"), undefined, "Strataa remains off");
@@ -529,7 +529,7 @@ test("unoffered choices or model disappearance cannot partially save a selection
     h.ctx.ui.select = async () => {
       if (failure === "unlisted") return "unlisted/model";
       if (step++ === 0) return ASTRA;
-      h.models.splice(h.models.findIndex(model => model.id === "gpt-6-astra"), 1);
+      h.models.splice(h.models.findIndex(model => model.id === "gpt-6.2-astra"), 1);
       return "high";
     };
     await h.command("brain");
@@ -1462,6 +1462,9 @@ test("role-specific selection crosses model families and recommended restore rep
   await h.command("stop");
   await h.command("models default");
   assert.deepEqual(h.modelSettings.read(), DEFAULT_MODELS);
+  for (const role of ["reviewer", "solo", "analysis"]) {
+    assert.deepEqual(h.modelSettings.read()[role], { model: "openai-codex/gpt-6.2-astra", reasoning: role === "analysis" ? "high" : "max" });
+  }
 });
 
 test("external profile changes affect the next request, not the current Router, executor or summary", async () => {

@@ -58,7 +58,7 @@ test("task calls: legacy helpers refused, owned-agent overrides stripped, review
   assert.equal(next.tasks[0], plain);
   assert.equal(next.context, "shared");
   assert.match(next.tasks[1].task, /^Re-review[\s\S]*## 이전 검토 라운드/);
-  assert.match(next.tasks[1].task, /### 라운드 1 \(job R1, 모델 openai-codex\/gpt-6-astra\)\nRound one findings/);
+  assert.match(next.tasks[1].task, /### 라운드 1 \(job R1, 모델 openai-codex\/gpt-6\.2-astra\)\nRound one findings/);
   assert.match(next.tasks[1].task, /### 라운드 2 \(job R2[\s\S]*"summary": "structured round"/);
   assert.doesNotMatch(next.tasks[1].task, /작업 패킷 실행 조건/);
   assert.equal(next.tasks[2].model, taskModelSelector(config.worker));

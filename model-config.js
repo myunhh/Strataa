@@ -10,10 +10,10 @@ export const DEFAULT_MODELS = Object.freeze(Object.fromEntries(Object.entries({
   router: { model: "openai-codex/gpt-6.1-terra", reasoning: "xhigh" },
   brain: { model: "anthropic/claude-fable-5-2", reasoning: "high" },
   worker: { model: "anthropic/claude-opus-5-5", reasoning: "medium" },
-  reviewer: { model: "openai-codex/gpt-6-astra", reasoning: "max" },
-  solo: { model: "openai-codex/gpt-6-astra", reasoning: "max" },
+  reviewer: { model: "openai-codex/gpt-6.2-astra", reasoning: "max" },
+  solo: { model: "openai-codex/gpt-6.2-astra", reasoning: "max" },
   summary: { model: "openai-codex/gpt-6-luna", reasoning: "low" },
-  analysis: { model: "openai-codex/gpt-6-astra", reasoning: "high" },
+  analysis: { model: "openai-codex/gpt-6.2-astra", reasoning: "high" },
 }).map(([role, value]) => [role, Object.freeze(value)])));
 
 export function normalizeModelConfig(input = DEFAULT_MODELS) {

@@ -133,6 +133,8 @@ Router는 요청과 최근 대화를 봅니다. 실험·학습 실행은 `run-ex
 
 `<provider/model>`은 실제 OMP 모델 ID로 바꿉니다. `/strataa <역할>`처럼 모델 인자를 생략하면 선택창을 엽니다. `models all`에서 강도를 생략하면 `auto`입니다. 모델별 지원 강도만 선택할 수 있고, 선택창을 취소하면 저장하지 않습니다. `models default`는 패키지에 보존된 기본 조합을 복원하며 모델 간 우열을 입증하지 않습니다.
 
+Reviewer·Solo의 기본 모델은 `openai-codex/gpt-6.2-astra`의 `max`, Dashboard 분석은 같은 모델의 `high`입니다. 업데이트는 저장된 모델 선택을 덮어쓰지 않습니다. 새 기본 조합을 적용하려면 진행 중인 작업이 끝난 뒤 `/strataa models default`를 실행하세요.
+
 설정은 `${XDG_CONFIG_HOME:-~/.config}/strataa/models.json`에 저장하며 같은 호스트의 Strataa 세션과 Dashboard가 공유합니다. 실행 시작 시 모델·강도를 고정합니다. 진행 중인 작업이 끝난 뒤 모델을 변경하세요.
 
 모델 선택, `/strataa on`, 다음 라우팅 요청에서 선택 모델을 OMP 전역 `modelRoles.strataa-<역할>`에 자동 등록합니다. `task.perCallModel`도 켜고, 전역 허용 목록이 비어 있지 않으면 선택한 모델 ID를 추가합니다. 기존 `default`·`slow` 등의 역할, 에이전트 오버라이드, 인증 정보는 유지합니다. 별도 승인 명령은 필요 없습니다. 프로젝트·설정 오버레이·런타임의 제한은 덮어쓰지 않고 명시적인 오류로 알립니다. Strataa를 꺼도 모델 등록은 유지합니다.

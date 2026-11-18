@@ -1,5 +1,10 @@
 # Changelog
 
+## 4.11.3 — 2026-11-18
+
+- Change the default Reviewer, Solo, and Dashboard analysis model to `openai-codex/gpt-6.2-astra`. Keep their reasoning levels at `max`, `max`, and `high`.
+- Preserve saved model choices. `/strataa models default` explicitly adopts the updated defaults.
+
 ## 4.11.2 — 2026-11-17
 
 - Register selected Strataa models as dedicated global OMP `strataa-*` roles through the host settings API. Synchronize on selection, enable, and routed requests, without changing existing default or slow roles.

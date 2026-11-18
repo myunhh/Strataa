@@ -1,6 +1,6 @@
 {
   "name": "omp-agent-strataa",
-  "version": "4.11.2",
+  "version": "4.11.3",
   "private": true,
   "description": "Strataa CLI research and engineering skills with ARIS and pstack for OMP",
   "homepage": "https://github.com/myunhh/Strataa",

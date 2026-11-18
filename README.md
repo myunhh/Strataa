@@ -124,13 +124,15 @@ Roles are `router`, `brain`, `worker`, `reviewer`, `solo`, `summary`, and `analy
 | Router | `openai-codex/gpt-6.1-terra` | `xhigh` |
 | Brain | `anthropic/claude-fable-5-2` | `high` |
 | Worker | `anthropic/claude-opus-5-5` | `medium` |
-| Reviewer and Solo | `openai-codex/gpt-6-astra` | `max` |
+| Reviewer and Solo | `openai-codex/gpt-6.2-astra` | `max` |
 | Request summary | `openai-codex/gpt-6-luna` | `low` |
-| Dashboard analysis | `openai-codex/gpt-6-astra` | `high` |
+| Dashboard analysis | `openai-codex/gpt-6.2-astra` | `high` |
 
 These defaults are configuration choices, not evidence of model superiority. `auto` uses the host/model automatic reasoning setting and also works for non-reasoning models. An unavailable model or unsupported explicit effort fails without fallback. Separate sessions on the same model are not cross-model validation.
 
 Model settings are host-local at `${XDG_CONFIG_HOME:-~/.config}/strataa/models.json`. New sessions and the Dashboard share this file. A run freezes its selected models and efforts at startup. Wait for that run to finish before changing models. Invalid shared configuration is an error. Use `/strataa models default` to recover. Old session model settings are imported only when the shared file is absent.
+
+Package updates preserve saved model choices. To adopt new defaults, run `/strataa models default` after the current run finishes.
 
 Model selection, `/strataa on`, and the next routed request synchronize the selected models into OMP's global `modelRoles.strataa-<role>` entries. They also enable `task.perCallModel` and add the selected identities to an existing nonempty global allowlist. Existing `default`, `slow`, other roles, agent overrides, and credentials are unchanged. No separate approval command is needed. Project, config-overlay, and runtime restrictions remain effective and produce an explicit error rather than being overwritten. Turning Strataa off stops routing but retains these model registrations.
 
