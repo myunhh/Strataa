@@ -56,11 +56,14 @@ export function arisHandoff(aris, agentsDirectory) {
   const root = aris.install.root;
   const agents = String(agentsDirectory ?? "").replace(/\/+$/, "");
   const skills = aris.skills.map(skill => `### 스킬 \`${skill.name}\` — ${skill.path}\n\n${skill.content.trim()}`).join("\n\n");
+  const paperBridge = aris.skills.some(({ name }) => ["research-lit", "paper-writing", "paper-write", "paper-claim-audit", "citation-audit"].includes(name))
+    ? `\nPaperOrchestra를 사용하거나 기존 결과를 인계하라고 명시한 요청만 ${root}/skills/strataa-paper-orchestra/SKILL.md를 읽고 해당 경로를 사용합니다. 외부 집필은 중복하지 말고 필요한 독립 감사는 유지합니다. 단순 언급·비교·준비·가져오기는 모델 호출 승인이 아닙니다.`
+    : "";
   const choice = role => `${aris.config[role].model} (effort ${aris.config[role].reasoning})`;
   return `Router가 이 요청을 ARIS 실행으로 분류했습니다. 당신은 ARIS 메인 두뇌(Brain)입니다: 분석·아이디어·계획·종합과 최종 답변의 소유자입니다. 실행 ID: ${aris.runId}. 선택된 스킬: ${aris.skills.map(skill => skill.name).join(", ")}.
 설치된 ARIS 번들 (upstream commit ${aris.install.commit}): ARIS_REPO=${root}
 - 스킬: ${root}/skills/<name>/SKILL.md · 공유 참조: ${root}/skills/shared-references/ · 도구: ${root}/tools/ · 템플릿: ${root}/templates/
-- 작업자 정의: ${agents}/${WORKER_AGENT}.md (Worker, 실행 전담) · 검토자 정의: ${agents}/${REVIEWER_AGENT}.md (Reviewer, 별도 읽기 전용 문맥)
+- 작업자 정의: ${agents}/${WORKER_AGENT}.md (Worker, 실행 전담) · 검토자 정의: ${agents}/${REVIEWER_AGENT}.md (Reviewer, 별도 읽기 전용 문맥)${paperBridge}
 
 ## 선택된 스킬 원문 (아래 OMP 실행 계약이 우선합니다)
 

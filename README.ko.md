@@ -120,6 +120,12 @@ Router는 요청과 최근 대화를 봅니다. 실험·학습 실행은 `run-ex
 
 계획 요청을 실행 승인으로 바꾸지 않습니다. 파일명에 “실험”이나 “overnight”가 있다는 이유만으로 코드 수정을 실험 실행으로 취급하지 않습니다. 밤샘 요청도 무한 반복이나 새 유료 자원 임대 승인이 아닙니다. 실제 자원·권한·필수 입력을 확인하고 사용자의 시간·라운드·비용 한도를 따릅니다.
 
+### PaperOrchestra와 집필을 나눌 때
+
+기본 집필기는 바뀌지 않습니다. [PaperOrchestra](https://github.com/google-research/paper-orchestra)에 문헌 조사만 맡기거나, 이미 생성한 초안을 Strataa로 검토할 때 선택합니다. 라우팅을 켠 뒤 “이 PaperOrchestra 결과를 가져와서 다시 쓰지 말고, 원본 CSV와 로컬 논문을 기준으로 수치·인용을 확인해 줘”라고 요청하세요.
+
+Strataa 소스에서 `npm run paper-orchestra -- --help`로 시작합니다. `prepare`는 승인된 집필 입력만 묶고, `import`는 기존 산출물을 오프라인에서 가져옵니다. `literature`와 `draft`에는 신뢰하는 외부 체크아웃, 실행 환경, 데이터 전송·모델 과금에 대한 명시적 승인이 필요합니다. [명령과 감사 절차](skills/strataa-paper-orchestra/SKILL.md)를 참고하세요. PDF를 가져왔다고 수치와 인용이 검증된 것은 아닙니다.
+
 ## 모델 설정
 
 현재 호스트의 OMP 전체 모델 목록에서 선택합니다. 고정된 모델 추천을 따를 필요는 없습니다. `router`, `brain`, `worker`, `reviewer`, `solo`, `summary`, `analysis`의 일곱 역할을 지원합니다.

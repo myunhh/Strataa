@@ -1,5 +1,10 @@
 # Changelog
 
+## 4.12.0 — Unreleased
+
+- Add an opt-in PaperOrchestra bridge for literature only or a full draft, without changing the default ARIS writer. Shared writing inputs and existing runs can be prepared or imported offline.
+- Pass the final manuscript, original result files and local citation sources to Strataa for independent review. Report missing evidence separately from generation and compilation. The bridge neither installs external software nor authorizes model calls.
+
 ## 4.11.3 — 2026-11-18
 
 - Change the default Reviewer, Solo, and Dashboard analysis model to `openai-codex/gpt-6.2-astra`. Keep their reasoning levels at `max`, `max`, and `high`.

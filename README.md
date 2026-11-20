@@ -100,6 +100,12 @@ Experiment execution, training, evaluation, seed/config batches, dependent queue
 
 Missing environment details do not silently switch research to ordinary work. The executor checks actual resources, permissions, and required inputs. User time, round, and cost limits remain binding. "Overnight" does not authorize endless loops or new paid rentals.
 
+### Use PaperOrchestra for part of a paper
+
+Keep the native writer unless you want [PaperOrchestra](https://github.com/google-research/paper-orchestra) to supply the related work or a full draft. With Strataa routing enabled, ask: “Import this PaperOrchestra draft and check its numbers and citations against these local sources. Do not write it again.” The bridge does not install the writer or authorize model calls.
+
+From the Strataa checkout, run `npm run paper-orchestra -- --help`. `prepare` packs the approved writing inputs; `import` reads an existing run offline. `literature` and `draft` require a trusted external checkout, its environment and explicit permission to send the inputs to a provider. See the [commands and reviewer handoff](skills/strataa-paper-orchestra/SKILL.md). Importing a PDF does not verify its claims.
+
 ## Commands and models
 
 | Command | Purpose |
